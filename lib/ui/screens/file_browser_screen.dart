@@ -560,6 +560,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     int downloaded = 0;
     int failed = 0;
+    int skipped = 0;
 
     final downloadDir = await _getDownloadDir();
 
@@ -567,12 +568,24 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (_cancelRequested) break;
 
       setState(() {
-        _fileDone = downloaded + failed;
+        _fileDone = downloaded + failed + skipped;
         _transferStatus = 'Downloading: ${file.name}';
       });
 
       try {
         final localPath = '${downloadDir.path}/${file.name}';
+
+        // Check if local file already exists
+        final localFile = File(localPath);
+        if (await localFile.exists()) {
+          if (!mounted) return;
+          final overwrite = await _askOverwrite(file.name);
+          if (!overwrite) {
+            skipped++;
+            continue;
+          }
+        }
+
         print('[DL] Batch: $localPath');
         final bytesBefore = _transferredBytes;
         await _connectionManager.downloadFile(
@@ -584,7 +597,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           },
         );
         downloaded++;
-        setState(() => _fileDone = downloaded + failed);
+        setState(() => _fileDone = downloaded + failed + skipped);
       } catch (e) {
         if (e.toString().contains('Cancelled')) break;
         failed++;
