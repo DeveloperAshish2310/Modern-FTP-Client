@@ -139,6 +139,7 @@ class ConnectionManager {
     required String remotePath,
     required String localPath,
     bool Function()? isCancelled,
+    Function(int, int)? onProgress,
   }) async {
     if (!isConnected || _activeConnection == null) {
       throw Exception('Not connected');
@@ -156,6 +157,7 @@ class ConnectionManager {
           remotePath: remotePath,
           localPath: localPath,
           isCancelled: isCancelled,
+          onProgress: onProgress,
         );
     }
   }

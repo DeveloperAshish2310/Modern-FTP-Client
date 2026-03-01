@@ -69,8 +69,18 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   bool _isTransferring = false;
   String _transferStatus = '';
   bool _cancelRequested = false;
-  int _transferDone = 0;
-  int _transferTotal = 0;
+  int _fileDone = 0;
+  int _fileTotal = 0;
+  int _transferredBytes = 0;
+  int _totalBytes = 0;
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
 
   @override
   void initState() {
@@ -355,11 +365,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
       if (result == null || result.files.isEmpty) return;
 
+      // Calculate total bytes
+      int totalSize = 0;
+      for (final f in result.files) {
+        if (f.path != null) totalSize += f.size;
+      }
+
       setState(() {
         _isTransferring = true;
         _cancelRequested = false;
-        _transferDone = 0;
-        _transferTotal = result.files.length;
+        _fileDone = 0;
+        _fileTotal = result.files.length;
+        _transferredBytes = 0;
+        _totalBytes = totalSize;
         _transferStatus = 'Uploading...';
       });
 
@@ -373,7 +391,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         if (file.path == null) continue;
 
         setState(() {
-          _transferDone = uploaded + skipped + failed;
+          _fileDone = uploaded + skipped + failed;
           _transferStatus = 'Uploading: ${file.name}';
         });
 
@@ -409,7 +427,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             remotePath: remotePath,
           );
           uploaded++;
-          setState(() => _transferDone = uploaded + skipped + failed);
+          _transferredBytes += File(file.path!).lengthSync();
+          setState(() => _fileDone = uploaded + skipped + failed);
         } catch (e) {
           failed++;
           lastError = e.toString().replaceAll('Exception: ', '');
@@ -469,14 +488,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       setState(() {
         _isTransferring = true;
         _cancelRequested = false;
-        _transferDone = 0;
-        _transferTotal = 1;
+        _fileDone = 0;
+        _fileTotal = 1;
+        _transferredBytes = 0;
+        _totalBytes = file.size;
         _transferStatus = 'Downloading: ${file.name}';
       });
 
       await _connectionManager.downloadFile(
         remotePath: file.path,
         localPath: localPath,
+        onProgress: (downloaded, total) {
+          if (mounted) setState(() => _transferredBytes = downloaded);
+        },
         isCancelled: () => _cancelRequested,
       );
 
@@ -518,11 +542,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     if (!await _ensureStoragePermission()) return;
 
+    // Calculate total size
+    int totalSize = 0;
+    for (final f in files) {
+      totalSize += f.size;
+    }
+
     setState(() {
       _isTransferring = true;
       _cancelRequested = false;
-      _transferDone = 0;
-      _transferTotal = files.length;
+      _fileDone = 0;
+      _fileTotal = files.length;
+      _transferredBytes = 0;
+      _totalBytes = totalSize;
       _transferStatus = 'Downloading...';
     });
 
@@ -535,20 +567,24 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (_cancelRequested) break;
 
       setState(() {
-        _transferDone = downloaded + failed;
+        _fileDone = downloaded + failed;
         _transferStatus = 'Downloading: ${file.name}';
       });
 
       try {
         final localPath = '${downloadDir.path}/${file.name}';
         print('[DL] Batch: $localPath');
+        final bytesBefore = _transferredBytes;
         await _connectionManager.downloadFile(
           remotePath: file.path,
           localPath: localPath,
           isCancelled: () => _cancelRequested,
+          onProgress: (dl, total) {
+            if (mounted) setState(() => _transferredBytes = bytesBefore + dl);
+          },
         );
         downloaded++;
-        setState(() => _transferDone = downloaded + failed);
+        setState(() => _fileDone = downloaded + failed);
       } catch (e) {
         if (e.toString().contains('Cancelled')) break;
         failed++;
@@ -1010,26 +1046,32 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Widget _buildBody() {
     // Transfer overlay
     if (_isTransferring) {
-      final pct = _transferTotal > 0
-          ? (_transferDone / _transferTotal * 100).round()
+      final pct = _totalBytes > 0
+          ? (_transferredBytes / _totalBytes * 100).round()
           : 0;
+      final progressValue = _totalBytes > 0
+          ? _transferredBytes / _totalBytes
+          : null;
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (_transferTotal > 0) ...[
+              if (_totalBytes > 0) ...[
                 Text(
-                  '$_transferDone / $_transferTotal files',
+                  'File $_fileDone / $_fileTotal',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 12),
-                LinearProgressIndicator(
-                  value: _transferTotal > 0
-                      ? _transferDone / _transferTotal
-                      : null,
+                const SizedBox(height: 8),
+                Text(
+                  '${_formatBytes(_transferredBytes)} / ${_formatBytes(_totalBytes)}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: Colors.grey),
                 ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: progressValue),
                 const SizedBox(height: 8),
                 Text('$pct%', style: Theme.of(context).textTheme.bodyLarge),
               ] else
