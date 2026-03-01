@@ -132,6 +132,13 @@ class AppTheme {
 
       iconTheme: const IconThemeData(color: Colors.white),
 
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        contentTextStyle: const TextStyle(fontSize: 14),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
+
       dividerColor: const Color(0xFF3A3A3A),
     );
   }
@@ -254,6 +261,13 @@ class AppTheme {
       ),
 
       iconTheme: const IconThemeData(color: Colors.black87),
+
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        contentTextStyle: const TextStyle(fontSize: 14),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
 
       dividerColor: const Color(0xFFE0E0E0),
     );

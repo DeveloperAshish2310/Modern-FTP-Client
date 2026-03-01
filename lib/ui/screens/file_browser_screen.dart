@@ -9,8 +9,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:open_filex/open_filex.dart';
 import '../../models/connection_model.dart';
 import '../../models/file_item_model.dart';
+import '../../models/transfer_model.dart';
 import '../../providers/connection_provider.dart';
 import '../../services/connection_manager.dart';
+import '../../core/database/database_helper.dart';
 
 /// Clipboard action for copy/move operations
 enum _ClipboardAction { copy, move }
@@ -67,6 +69,31 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   }
 
   DateTime _lastProgressUpdate = DateTime.now();
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+
+  void _recordTransfer({
+    required String fileName,
+    required String localPath,
+    required String remotePath,
+    required int fileSize,
+    required TransferType type,
+    required TransferStatus status,
+    String? errorMessage,
+  }) {
+    final transfer = TransferModel(
+      connectionId: widget.connection.id ?? 0,
+      fileName: fileName,
+      localPath: localPath,
+      remotePath: remotePath,
+      fileSize: fileSize,
+      type: type,
+      status: status,
+      startedAt: DateTime.now(),
+      completedAt: status == TransferStatus.completed ? DateTime.now() : null,
+      errorMessage: errorMessage,
+    );
+    _dbHelper.insertTransfer(transfer.toMap());
+  }
 
   // Sort
   _SortMode _sortMode = _SortMode.nameAsc;
@@ -485,6 +512,23 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
       );
+
+      // Record uploads to DB
+      for (final f in result.files) {
+        if (f.path != null) {
+          final localFile = File(f.path!);
+          final size = await localFile.exists() ? await localFile.length() : 0;
+          _recordTransfer(
+            fileName: f.name,
+            localPath: f.path!,
+            remotePath: '$_currentPath/${f.name}',
+            fileSize: size,
+            type: TransferType.upload,
+            status: TransferStatus.completed,
+          );
+        }
+      }
+
       _invalidateCache();
       _loadDirectory(_currentPath);
     } catch (e) {
@@ -546,6 +590,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (!mounted) return;
       setState(() => _isTransferring = false);
 
+      _recordTransfer(
+        fileName: file.name,
+        localPath: localPath,
+        remotePath: file.path,
+        fileSize: file.size,
+        type: TransferType.download,
+        status: TransferStatus.completed,
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Downloaded: ${file.name}'),
@@ -560,7 +613,17 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (!mounted) return;
       setState(() => _isTransferring = false);
       final msg = e.toString().replaceAll('Exception: ', '');
-      if (!msg.contains('Cancelled')) {
+      final isCancelled = msg.contains('Cancelled');
+      _recordTransfer(
+        fileName: file.name,
+        localPath: '',
+        remotePath: file.path,
+        fileSize: file.size,
+        type: TransferType.download,
+        status: isCancelled ? TransferStatus.cancelled : TransferStatus.failed,
+        errorMessage: isCancelled ? null : msg,
+      );
+      if (!isCancelled) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $msg')));

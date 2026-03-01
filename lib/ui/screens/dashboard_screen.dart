@@ -4,6 +4,7 @@ import '../../providers/connection_provider.dart';
 import '../../models/connection_model.dart';
 import 'add_connection_screen.dart';
 import 'file_browser_screen.dart';
+import 'transfer_manager_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -22,9 +23,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text('FTP Client'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.swap_vert),
+            tooltip: 'Transfers',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TransferManagerScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              // Navigate to settings (to be implemented)
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Settings coming soon')),
               );
