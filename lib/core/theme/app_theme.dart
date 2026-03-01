@@ -134,8 +134,10 @@ class AppTheme {
 
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF323232),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
+        actionTextColor: accentColor,
         insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
 
@@ -264,8 +266,10 @@ class AppTheme {
 
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF323232),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        contentTextStyle: const TextStyle(fontSize: 14),
+        contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
+        actionTextColor: accentColor,
         insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
 
