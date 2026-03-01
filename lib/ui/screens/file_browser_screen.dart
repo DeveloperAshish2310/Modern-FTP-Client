@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:open_filex/open_filex.dart';
 import '../../models/connection_model.dart';
 import '../../models/file_item_model.dart';
 import '../../providers/connection_provider.dart';
@@ -341,6 +342,22 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     });
   }
 
+  /// Trigger Android MediaScanner so the file shows up in the file manager
+  Future<void> _scanFile(String path) async {
+    try {
+      // Use Android's media scan broadcast
+      await Process.run('am', [
+        'broadcast',
+        '-a',
+        'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
+        '-d',
+        'file://$path',
+      ]);
+    } catch (_) {
+      // Non-critical, file is still downloaded
+    }
+  }
+
   // --- Upload ---
   Future<void> _uploadFiles() async {
     try {
@@ -475,11 +492,21 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         localPath: localPath,
       );
 
+      // Notify Android MediaScanner so file appears in file manager
+      await _scanFile(localPath);
+
       if (!mounted) return;
       setState(() => _isTransferring = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Downloaded to: $localPath')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved to: Download/FTPClient/${file.name}'),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'OPEN',
+            onPressed: () => OpenFilex.open(localPath),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isTransferring = false);
@@ -536,6 +563,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           remotePath: file.path,
           localPath: localPath,
         );
+        await _scanFile(localPath);
         downloaded++;
         setState(() => _transferDone = downloaded + failed);
       } catch (e) {
@@ -551,8 +579,16 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
+          'Downloaded $downloaded to Download/FTPClient/${failed > 0 ? ' ($failed failed)' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
         ),
+        duration: const Duration(seconds: 5),
+        action: downloaded > 0
+            ? SnackBarAction(
+                label: 'OPEN FOLDER',
+                onPressed: () =>
+                    OpenFilex.open('/storage/emulated/0/Download/FTPClient'),
+              )
+            : null,
       ),
     );
   }

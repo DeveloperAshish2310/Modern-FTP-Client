@@ -57,6 +57,7 @@ dependencies:
   # File Operations
   file_picker: ^8.0.0
   permission_handler: ^11.1.0
+  open_filex: ^4.5.0
   
   # Authentication
   local_auth: ^2.1.8
