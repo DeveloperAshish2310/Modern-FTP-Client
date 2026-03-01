@@ -187,6 +187,13 @@ class SFTPService {
 
     try {
       final localFile = File(localPath);
+
+      // Ensure parent directory exists
+      final parentDir = localFile.parent;
+      if (!await parentDir.exists()) {
+        await parentDir.create(recursive: true);
+      }
+
       final remoteFile = await _sftpClient!.open(remotePath);
 
       // Get file size for progress tracking
@@ -205,8 +212,19 @@ class SFTPService {
         }
       }
 
+      await sink.flush();
       await sink.close();
-      return true;
+
+      // Verify file was actually written
+      if (await localFile.exists()) {
+        final writtenSize = await localFile.length();
+        debugPrint(
+          'SFTP Download complete: $remotePath -> $localPath ($writtenSize bytes)',
+        );
+        return true;
+      } else {
+        throw Exception('File was not saved to disk');
+      }
     } catch (e) {
       debugPrint('SFTP Download Error: $e');
       throw Exception('Download failed: $e');

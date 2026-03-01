@@ -163,6 +163,12 @@ class FTPService {
     try {
       final localFile = File(localPath);
 
+      // Ensure parent directory exists
+      final parentDir = localFile.parent;
+      if (!await parentDir.exists()) {
+        await parentDir.create(recursive: true);
+      }
+
       // Extract directory and filename from remote path
       final lastSlash = remotePath.lastIndexOf('/');
       final dir = lastSlash > 0 ? remotePath.substring(0, lastSlash) : '/';
@@ -174,7 +180,17 @@ class FTPService {
       await _ftpConnect!.changeDirectory(dir);
 
       final result = await _ftpConnect!.downloadFile(fileName, localFile);
-      return result;
+
+      // Verify file was actually written
+      if (result && await localFile.exists()) {
+        final writtenSize = await localFile.length();
+        debugPrint(
+          'FTP Download complete: $remotePath -> $localPath ($writtenSize bytes)',
+        );
+        return true;
+      } else {
+        throw Exception('File was not saved to disk');
+      }
     } catch (e) {
       debugPrint('FTP Download Error: $e');
       throw Exception('Download failed: $e');
