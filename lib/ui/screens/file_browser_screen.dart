@@ -1,11 +1,30 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../models/connection_model.dart';
 import '../../models/file_item_model.dart';
 import '../../providers/connection_provider.dart';
 import '../../services/connection_manager.dart';
+
+/// Clipboard action for copy/move operations
+enum _ClipboardAction { copy, move }
+
+class _ClipboardData {
+  final List<FileItemModel> files;
+  final _ClipboardAction action;
+  final String sourcePath;
+
+  _ClipboardData({
+    required this.files,
+    required this.action,
+    required this.sourcePath,
+  });
+}
 
 class FileBrowserScreen extends StatefulWidget {
   final ConnectionModel connection;
@@ -24,6 +43,17 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   String _currentPath = '/';
+
+  // Multi-select
+  bool _isSelectionMode = false;
+  final Set<String> _selectedPaths = {};
+
+  // Clipboard for copy/move
+  _ClipboardData? _clipboard;
+
+  // Transfer progress
+  bool _isTransferring = false;
+  String _transferStatus = '';
 
   @override
   void initState() {
@@ -56,7 +86,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (!mounted) return;
 
       if (success) {
-        // Update last used timestamp
         Provider.of<ConnectionProvider>(
           context,
           listen: false,
@@ -66,7 +95,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         setState(() {
           _isConnecting = false;
           _errorMessage =
-              'Failed to connect to ${widget.connection.host}.\nPlease check your credentials and server settings.';
+              'Failed to connect to ${widget.connection.host}.\nCheck credentials and server settings.';
         });
       }
     } catch (e) {
@@ -76,7 +105,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         _errorMessage =
             'Connection error: ${e.toString().replaceAll('Exception: ', '')}';
       });
-      debugPrint('Connection error: $e');
     }
   }
 
@@ -90,7 +118,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       final files = await _connectionManager.listDirectory(path);
       if (!mounted) return;
 
-      // Sort: directories first, then alphabetically
       files.sort((a, b) {
         if (a.isDirectory && !b.isDirectory) return -1;
         if (!a.isDirectory && b.isDirectory) return 1;
@@ -111,7 +138,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         _errorMessage =
             'Failed to list directory: ${e.toString().replaceAll('Exception: ', '')}';
       });
-      debugPrint('List directory error: $e');
     }
   }
 
@@ -127,79 +153,638 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: _pathHistory.length <= 1,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          _navigateUp();
+  // --- Selection ---
+  void _toggleSelection(FileItemModel file) {
+    setState(() {
+      if (_selectedPaths.contains(file.path)) {
+        _selectedPaths.remove(file.path);
+        if (_selectedPaths.isEmpty) _isSelectionMode = false;
+      } else {
+        _selectedPaths.add(file.path);
+      }
+    });
+  }
+
+  void _enterSelectionMode(FileItemModel file) {
+    setState(() {
+      _isSelectionMode = true;
+      _selectedPaths.add(file.path);
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedPaths.clear();
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      _selectedPaths.addAll(_files.map((f) => f.path));
+    });
+  }
+
+  List<FileItemModel> get _selectedFiles =>
+      _files.where((f) => _selectedPaths.contains(f.path)).toList();
+
+  // --- Upload ---
+  Future<void> _uploadFiles() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+      if (result == null || result.files.isEmpty) return;
+
+      setState(() {
+        _isTransferring = true;
+        _transferStatus = 'Uploading 0/${result.files.length}...';
+      });
+
+      int uploaded = 0;
+      int failed = 0;
+
+      for (final file in result.files) {
+        if (file.path == null) continue;
+
+        setState(() {
+          _transferStatus =
+              'Uploading ${uploaded + 1}/${result.files.length}: ${file.name}';
+        });
+
+        try {
+          final remotePath = '$_currentPath/${file.name}';
+          await _connectionManager.uploadFile(
+            localPath: file.path!,
+            remotePath: remotePath,
+          );
+          uploaded++;
+        } catch (e) {
+          failed++;
+          debugPrint('Upload failed for ${file.name}: $e');
         }
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.connection.name),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () async {
-              if (_pathHistory.length > 1) {
-                _navigateUp();
-              } else {
-                await _connectionManager.disconnect();
-                if (mounted) Navigator.pop(context);
-              }
-            },
+      }
+
+      if (!mounted) return;
+      setState(() => _isTransferring = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Uploaded $uploaded file(s)${failed > 0 ? ', $failed failed' : ''}',
           ),
-          actions: [
-            if (!_isConnecting)
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                onPressed: () => _loadDirectory(_currentPath),
-              ),
-            if (!_isConnecting)
-              PopupMenuButton<String>(
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'new_folder',
-                    child: Row(
-                      children: [
-                        Icon(Icons.create_new_folder),
-                        SizedBox(width: 8),
-                        Text('New Folder'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'disconnect',
-                    child: Row(
-                      children: [
-                        Icon(Icons.link_off, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Disconnect', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-                ],
-                onSelected: (value) {
-                  switch (value) {
-                    case 'new_folder':
-                      _showCreateFolderDialog();
-                      break;
-                    case 'disconnect':
-                      _connectionManager.disconnect();
-                      Navigator.pop(context);
-                      break;
-                  }
-                },
-              ),
-          ],
         ),
-        body: _buildBody(),
+      );
+      _loadDirectory(_currentPath);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isTransferring = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
+    }
+  }
+
+  // --- Download ---
+  Future<void> _downloadFile(FileItemModel file) async {
+    if (file.isDirectory) return;
+
+    // Request storage permissions
+    if (Platform.isAndroid) {
+      final status = await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Storage permission required for downloads'),
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() {
+      _isTransferring = true;
+      _transferStatus = 'Downloading: ${file.name}';
+    });
+
+    try {
+      final downloadDir = Directory('/storage/emulated/0/Download/FTPClient');
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+
+      final localPath = '${downloadDir.path}/${file.name}';
+
+      await _connectionManager.downloadFile(
+        remotePath: file.path,
+        localPath: localPath,
+      );
+
+      if (!mounted) return;
+      setState(() => _isTransferring = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Downloaded to: $localPath')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isTransferring = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Download failed: ${e.toString().replaceAll('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadSelected() async {
+    final files = _selectedFiles.where((f) => !f.isDirectory).toList();
+    if (files.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No files selected (folders are skipped)'),
+        ),
+      );
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      final status = await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Storage permission required')),
+        );
+        return;
+      }
+    }
+
+    setState(() {
+      _isTransferring = true;
+      _transferStatus = 'Downloading 0/${files.length}...';
+    });
+
+    int downloaded = 0;
+    int failed = 0;
+
+    final downloadDir = Directory('/storage/emulated/0/Download/FTPClient');
+    if (!await downloadDir.exists()) {
+      await downloadDir.create(recursive: true);
+    }
+
+    for (final file in files) {
+      setState(() {
+        _transferStatus =
+            'Downloading ${downloaded + 1}/${files.length}: ${file.name}';
+      });
+
+      try {
+        final localPath = '${downloadDir.path}/${file.name}';
+        await _connectionManager.downloadFile(
+          remotePath: file.path,
+          localPath: localPath,
+        );
+        downloaded++;
+      } catch (e) {
+        failed++;
+        debugPrint('Download failed for ${file.name}: $e');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _isTransferring = false);
+    _exitSelectionMode();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}',
+        ),
       ),
     );
   }
 
+  // --- Delete Selected ---
+  Future<void> _deleteSelected() async {
+    final files = _selectedFiles;
+    if (files.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Selected'),
+        content: Text('Delete ${files.length} item(s)?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isTransferring = true;
+      _transferStatus = 'Deleting...';
+    });
+
+    int deleted = 0;
+    int failed = 0;
+
+    for (final file in files) {
+      try {
+        bool result;
+        if (file.isDirectory) {
+          result = await _connectionManager.deleteDirectory(file.path);
+        } else {
+          result = await _connectionManager.deleteFile(file.path);
+        }
+        if (result) {
+          deleted++;
+        } else {
+          failed++;
+        }
+      } catch (e) {
+        failed++;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _isTransferring = false);
+    _exitSelectionMode();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Deleted $deleted item(s)${failed > 0 ? ', $failed failed' : ''}',
+        ),
+      ),
+    );
+    _loadDirectory(_currentPath);
+  }
+
+  // --- Copy / Move ---
+  void _copySelected() {
+    final files = _selectedFiles;
+    if (files.isEmpty) return;
+
+    setState(() {
+      _clipboard = _ClipboardData(
+        files: List.from(files),
+        action: _ClipboardAction.copy,
+        sourcePath: _currentPath,
+      );
+    });
+    _exitSelectionMode();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${files.length} item(s) copied. Navigate to destination and paste.',
+        ),
+      ),
+    );
+  }
+
+  void _moveSelected() {
+    final files = _selectedFiles;
+    if (files.isEmpty) return;
+
+    setState(() {
+      _clipboard = _ClipboardData(
+        files: List.from(files),
+        action: _ClipboardAction.move,
+        sourcePath: _currentPath,
+      );
+    });
+    _exitSelectionMode();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${files.length} item(s) cut. Navigate to destination and paste.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _paste() async {
+    if (_clipboard == null) return;
+
+    setState(() {
+      _isTransferring = true;
+      _transferStatus = 'Pasting...';
+    });
+
+    int succeeded = 0;
+    int failed = 0;
+
+    for (final file in _clipboard!.files) {
+      final newPath = '$_currentPath/${file.name}';
+
+      try {
+        if (_clipboard!.action == _ClipboardAction.move) {
+          // Move = rename to new path
+          final result = await _connectionManager.rename(file.path, newPath);
+          result ? succeeded++ : failed++;
+        } else {
+          // Copy: download temp, upload to new location
+          final tempDir = await getTemporaryDirectory();
+          final tempPath = '${tempDir.path}/${file.name}';
+
+          if (file.isDirectory) {
+            // Can't easily copy directories, skip
+            failed++;
+            continue;
+          }
+
+          await _connectionManager.downloadFile(
+            remotePath: file.path,
+            localPath: tempPath,
+          );
+          await _connectionManager.uploadFile(
+            localPath: tempPath,
+            remotePath: newPath,
+          );
+
+          // Clean up temp file
+          final tempFile = File(tempPath);
+          if (await tempFile.exists()) await tempFile.delete();
+          succeeded++;
+        }
+      } catch (e) {
+        failed++;
+        debugPrint('Paste failed for ${file.name}: $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _isTransferring = false;
+      _clipboard = null;
+    });
+
+    final actionName = _clipboard?.action == _ClipboardAction.move
+        ? 'Moved'
+        : 'Copied';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$actionName $succeeded item(s)${failed > 0 ? ', $failed failed' : ''}',
+        ),
+      ),
+    );
+    _loadDirectory(_currentPath);
+  }
+
+  // --- Copy/Move single file from context menu ---
+  void _copySingle(FileItemModel file) {
+    setState(() {
+      _clipboard = _ClipboardData(
+        files: [file],
+        action: _ClipboardAction.copy,
+        sourcePath: _currentPath,
+      );
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '"${file.name}" copied. Navigate to destination and paste.',
+        ),
+      ),
+    );
+  }
+
+  void _moveSingle(FileItemModel file) {
+    setState(() {
+      _clipboard = _ClipboardData(
+        files: [file],
+        action: _ClipboardAction.move,
+        sourcePath: _currentPath,
+      );
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('"${file.name}" cut. Navigate to destination and paste.'),
+      ),
+    );
+  }
+
+  // ===================== BUILD =====================
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: _pathHistory.length <= 1 && !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_isSelectionMode) {
+          _exitSelectionMode();
+        } else {
+          _navigateUp();
+        }
+      },
+      child: Scaffold(
+        appBar: _isSelectionMode
+            ? _buildSelectionAppBar()
+            : _buildNormalAppBar(),
+        body: _buildBody(),
+        floatingActionButton:
+            (!_isConnecting && _errorMessage == null && !_isSelectionMode)
+            ? FloatingActionButton(
+                onPressed: _uploadFiles,
+                child: const Icon(Icons.upload_file),
+              )
+            : null,
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildNormalAppBar() {
+    return AppBar(
+      title: Text(widget.connection.name),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back),
+        onPressed: () async {
+          if (_pathHistory.length > 1) {
+            _navigateUp();
+          } else {
+            await _connectionManager.disconnect();
+            if (mounted) Navigator.pop(context);
+          }
+        },
+      ),
+      actions: [
+        if (!_isConnecting && _errorMessage == null) ...[
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _loadDirectory(_currentPath),
+          ),
+          PopupMenuButton<String>(
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'new_folder',
+                child: ListTile(
+                  leading: Icon(Icons.create_new_folder),
+                  title: Text('New Folder'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'select',
+                child: ListTile(
+                  leading: Icon(Icons.checklist),
+                  title: Text('Select Items'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              if (_clipboard != null)
+                PopupMenuItem(
+                  value: 'paste',
+                  child: ListTile(
+                    leading: const Icon(Icons.paste),
+                    title: Text('Paste (${_clipboard!.files.length})'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'disconnect',
+                child: ListTile(
+                  leading: Icon(Icons.link_off, color: Colors.red),
+                  title: Text(
+                    'Disconnect',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+            onSelected: (value) {
+              switch (value) {
+                case 'new_folder':
+                  _showCreateFolderDialog();
+                  break;
+                case 'select':
+                  setState(() => _isSelectionMode = true);
+                  break;
+                case 'paste':
+                  _paste();
+                  break;
+                case 'disconnect':
+                  _connectionManager.disconnect();
+                  Navigator.pop(context);
+                  break;
+              }
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
+  PreferredSizeWidget _buildSelectionAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        onPressed: _exitSelectionMode,
+      ),
+      title: Text('${_selectedPaths.length} selected'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.select_all),
+          tooltip: 'Select All',
+          onPressed: _selectAll,
+        ),
+        // Download selected files
+        IconButton(
+          icon: const Icon(Icons.download),
+          tooltip: 'Download',
+          onPressed: _selectedPaths.isNotEmpty ? _downloadSelected : null,
+        ),
+        // More actions
+        PopupMenuButton<String>(
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'copy',
+              child: ListTile(
+                leading: Icon(Icons.copy),
+                title: Text('Copy'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'move',
+              child: ListTile(
+                leading: Icon(Icons.content_cut),
+                title: Text('Move'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: ListTile(
+                leading: Icon(Icons.delete, color: Colors.red),
+                title: Text('Delete', style: TextStyle(color: Colors.red)),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ],
+          onSelected: (value) {
+            switch (value) {
+              case 'copy':
+                _copySelected();
+                break;
+              case 'move':
+                _moveSelected();
+                break;
+              case 'delete':
+                _deleteSelected();
+                break;
+            }
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _buildBody() {
+    // Transfer overlay
+    if (_isTransferring) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 24),
+            Text(
+              _transferStatus,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Please wait...',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
+    }
+
     // Connecting state
     if (_isConnecting && _errorMessage == null) {
       return Center(
@@ -267,12 +852,38 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     // File list
     return Column(
       children: [
-        // Breadcrumbs
         _buildBreadcrumbs(),
+        // Clipboard banner
+        if (_clipboard != null)
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).colorScheme.primary.withAlpha(30),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  _clipboard!.action == _ClipboardAction.copy
+                      ? Icons.copy
+                      : Icons.content_cut,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${_clipboard!.files.length} item(s) ${_clipboard!.action == _ClipboardAction.copy ? 'copied' : 'cut'}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                TextButton(onPressed: _paste, child: const Text('PASTE HERE')),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  onPressed: () => setState(() => _clipboard = null),
+                ),
+              ],
+            ),
+          ),
         const Divider(height: 1),
-        // Loading indicator
         if (_isLoading) const LinearProgressIndicator(),
-        // File list
         Expanded(
           child: _files.isEmpty
               ? Center(
@@ -296,9 +907,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   onRefresh: () => _loadDirectory(_currentPath),
                   child: ListView.builder(
                     itemCount: _files.length,
-                    itemBuilder: (context, index) {
-                      return _buildFileItem(_files[index]);
-                    },
+                    itemBuilder: (context, index) =>
+                        _buildFileItem(_files[index]),
                   ),
                 ),
         ),
@@ -376,27 +986,44 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   }
 
   Widget _buildFileItem(FileItemModel file) {
+    final isSelected = _selectedPaths.contains(file.path);
+
     return InkWell(
       onTap: () {
-        if (file.isDirectory) {
+        if (_isSelectionMode) {
+          _toggleSelection(file);
+        } else if (file.isDirectory) {
           _navigateTo(file.path);
         } else {
           _showFileInfoDialog(file);
         }
       },
-      onLongPress: () => _showFileActions(file),
+      onLongPress: () {
+        if (!_isSelectionMode) {
+          _enterSelectionMode(file);
+        }
+      },
       child: Container(
+        color: isSelected
+            ? Theme.of(context).colorScheme.primary.withAlpha(30)
+            : null,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            // File icon
-            Icon(
-              file.icon,
-              size: 32,
-              color: file.isDirectory
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.grey[400],
-            ),
+            // Checkbox in selection mode, otherwise file icon
+            if (_isSelectionMode)
+              Checkbox(
+                value: isSelected,
+                onChanged: (_) => _toggleSelection(file),
+              )
+            else
+              Icon(
+                file.icon,
+                size: 32,
+                color: file.isDirectory
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.grey[400],
+              ),
             const SizedBox(width: 16),
             // File info
             Expanded(
@@ -433,11 +1060,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                 ],
               ),
             ),
-            // Action button
-            IconButton(
-              icon: const Icon(Icons.more_vert, size: 20),
-              onPressed: () => _showFileActions(file),
-            ),
+            // 3-dot menu (not in selection mode)
+            if (!_isSelectionMode)
+              IconButton(
+                icon: const Icon(Icons.more_vert, size: 20),
+                onPressed: () => _showFileActions(file),
+              ),
           ],
         ),
       ),
@@ -447,7 +1075,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   void _showFileActions(FileItemModel file) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SafeArea(
+      builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Column(
@@ -460,10 +1088,20 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                     Icon(file.icon, size: 28),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        file.name,
-                        style: Theme.of(context).textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            file.name,
+                            style: Theme.of(context).textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (!file.isDirectory)
+                            Text(
+                              file.formattedSize,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -475,24 +1113,49 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   leading: const Icon(Icons.folder_open),
                   title: const Text('Open'),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(ctx);
                     _navigateTo(file.path);
                   },
                 ),
+              if (!file.isDirectory)
+                ListTile(
+                  leading: const Icon(Icons.download),
+                  title: const Text('Download'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _downloadFile(file);
+                  },
+                ),
               ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Details'),
+                leading: const Icon(Icons.copy),
+                title: const Text('Copy'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _showFileInfoDialog(file);
+                  Navigator.pop(ctx);
+                  _copySingle(file);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.content_cut),
+                title: const Text('Move'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _moveSingle(file);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.edit),
                 title: const Text('Rename'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(ctx);
                   _showRenameDialog(file);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Details'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showFileInfoDialog(file);
                 },
               ),
               ListTile(
@@ -502,7 +1165,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   style: TextStyle(color: Colors.red),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(ctx);
                   _showDeleteDialog(file);
                 },
               ),
@@ -512,6 +1175,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       ),
     );
   }
+
+  // ===================== DIALOGS =====================
 
   void _showFileInfoDialog(FileItemModel file) {
     showDialog(

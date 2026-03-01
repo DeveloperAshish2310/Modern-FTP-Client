@@ -134,71 +134,66 @@ class ConnectionManager {
     }
   }
 
-  /// Download file (for FTP)
-  Future<bool> downloadFileFTP({
+  /// Download file (unified for all protocols)
+  Future<bool> downloadFile({
     required String remotePath,
     required String localPath,
-    Function(double)? onProgress,
   }) async {
-    if (!isConnected || _ftpService == null) {
-      throw Exception('Not connected to FTP');
+    if (!isConnected || _activeConnection == null) {
+      throw Exception('Not connected');
     }
 
-    return await _ftpService!.downloadFile(
-      remotePath: remotePath,
-      localPath: localPath,
-      onProgress: onProgress,
-    );
+    switch (_activeConnection!.protocol) {
+      case ConnectionProtocol.ftp:
+      case ConnectionProtocol.ftps:
+        return await _ftpService!.downloadFile(
+          remotePath: remotePath,
+          localPath: localPath,
+        );
+      case ConnectionProtocol.sftp:
+        return await _sftpService!.downloadFile(
+          remotePath: remotePath,
+          localPath: localPath,
+        );
+    }
   }
 
-  /// Upload file (for FTP)
-  Future<bool> uploadFileFTP({
+  /// Upload file (unified for all protocols)
+  Future<bool> uploadFile({
     required String localPath,
     required String remotePath,
-    Function(double)? onProgress,
   }) async {
-    if (!isConnected || _ftpService == null) {
-      throw Exception('Not connected to FTP');
+    if (!isConnected || _activeConnection == null) {
+      throw Exception('Not connected');
     }
 
-    return await _ftpService!.uploadFile(
-      localPath: localPath,
-      remotePath: remotePath,
-      onProgress: onProgress,
-    );
+    switch (_activeConnection!.protocol) {
+      case ConnectionProtocol.ftp:
+      case ConnectionProtocol.ftps:
+        return await _ftpService!.uploadFile(
+          localPath: localPath,
+          remotePath: remotePath,
+        );
+      case ConnectionProtocol.sftp:
+        return await _sftpService!.uploadFile(
+          localPath: localPath,
+          remotePath: remotePath,
+        );
+    }
   }
 
-  /// Download file (for SFTP)
-  Future<bool> downloadFileSFTP({
-    required String remotePath,
-    required String localPath,
-    Function(int, int)? onProgress,
-  }) async {
-    if (!isConnected || _sftpService == null) {
-      throw Exception('Not connected to SFTP');
+  /// Check if a path exists on server
+  Future<bool> exists(String path) async {
+    if (!isConnected || _activeConnection == null) {
+      throw Exception('Not connected');
     }
 
-    return await _sftpService!.downloadFile(
-      remotePath: remotePath,
-      localPath: localPath,
-      onProgress: onProgress,
-    );
-  }
-
-  /// Upload file (for SFTP)
-  Future<bool> uploadFileSFTP({
-    required String localPath,
-    required String remotePath,
-    Function(int, int)? onProgress,
-  }) async {
-    if (!isConnected || _sftpService == null) {
-      throw Exception('Not connected to SFTP');
+    switch (_activeConnection!.protocol) {
+      case ConnectionProtocol.ftp:
+      case ConnectionProtocol.ftps:
+        return await _ftpService!.exists(path);
+      case ConnectionProtocol.sftp:
+        return await _sftpService!.exists(path);
     }
-
-    return await _sftpService!.uploadFile(
-      localPath: localPath,
-      remotePath: remotePath,
-      onProgress: onProgress,
-    );
   }
 }
