@@ -247,9 +247,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   // --- Upload ---
   Future<void> _uploadFiles() async {
     try {
-      // Request permission BEFORE picking files
-      if (!await _ensureStoragePermission()) return;
-
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
       if (result == null || result.files.isEmpty) return;
 
@@ -262,6 +259,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       int uploaded = 0;
       int failed = 0;
       int skipped = 0;
+      String? lastError;
 
       for (final file in result.files) {
         if (_cancelRequested) break;
@@ -276,15 +274,26 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           final remotePath = '$_currentPath/${file.name}';
 
           // Check if file exists on server
-          final exists = await _connectionManager
-              .exists(remotePath)
-              .catchError((_) => false);
-          if (exists) {
+          bool fileExists = false;
+          try {
+            fileExists = await _connectionManager.exists(remotePath);
+          } catch (_) {
+            // If exists check fails, just try uploading
+          }
+
+          if (fileExists) {
             if (!mounted) return;
             final overwrite = await _askOverwrite(file.name);
             if (!overwrite) {
               skipped++;
               continue;
+            }
+            // Delete existing file on server before overwriting
+            try {
+              await _connectionManager.deleteFile(remotePath);
+            } catch (e) {
+              debugPrint('Could not delete existing file: $e');
+              // Try uploading anyway
             }
           }
 
@@ -295,6 +304,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           uploaded++;
         } catch (e) {
           failed++;
+          lastError = e.toString().replaceAll('Exception: ', '');
           debugPrint('Upload failed for ${file.name}: $e');
         }
       }
@@ -308,16 +318,25 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (failed > 0) parts.add('$failed failed');
       if (_cancelRequested) parts.add('cancelled');
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(parts.join(', '))));
+      String message = parts.join(', ');
+      if (failed > 0 && lastError != null) {
+        message += '\nError: $lastError';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
+      );
       _loadDirectory(_currentPath);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isTransferring = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Upload error: ${e.toString().replaceAll("Exception: ", "")}',
+          ),
+        ),
+      );
     }
   }
 
