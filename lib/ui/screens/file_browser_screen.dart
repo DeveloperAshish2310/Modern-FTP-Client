@@ -958,6 +958,14 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: () => _loadDirectory(_currentPath),
           ),
+          IconButton(
+            icon: const Icon(Icons.swap_vert),
+            tooltip: 'Transfers',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TransferManagerScreen()),
+            ),
+          ),
           PopupMenuButton<String>(
             itemBuilder: (context) => [
               const PopupMenuItem(
