@@ -51,6 +51,10 @@ class TransferService extends ChangeNotifier {
   final List<ActiveTransfer> _activeTransfers = [];
   bool _initialized = false;
 
+  // Cache connection managers for retry
+  final Map<int, ConnectionManager> _connectionManagers = {};
+  final Map<int, ConnectionModel> _connections = {};
+
   List<ActiveTransfer> get activeTransfers =>
       List.unmodifiable(_activeTransfers);
   int get activeCount => _activeTransfers.length;
@@ -91,6 +95,10 @@ class TransferService extends ChangeNotifier {
     required int fileSize,
   }) async {
     await init();
+
+    // Cache for retry
+    _connectionManagers[connection.id ?? 0] = connectionManager;
+    _connections[connection.id ?? 0] = connection;
 
     // Insert into DB
     final transfer = TransferModel(
@@ -135,6 +143,10 @@ class TransferService extends ChangeNotifier {
   }) async {
     await init();
 
+    // Cache for retry
+    _connectionManagers[connection.id ?? 0] = connectionManager;
+    _connections[connection.id ?? 0] = connection;
+
     final transfer = TransferModel(
       connectionId: connection.id ?? 0,
       fileName: fileName,
@@ -169,6 +181,34 @@ class TransferService extends ChangeNotifier {
       _activeTransfers[idx].status = TransferStatus.cancelled;
       notifyListeners();
     }
+  }
+
+  /// Retry a failed/cancelled transfer from history
+  Future<bool> retryTransfer(TransferModel transfer) async {
+    final cm = _connectionManagers[transfer.connectionId];
+    final conn = _connections[transfer.connectionId];
+    if (cm == null || conn == null) return false;
+
+    if (transfer.type == TransferType.download) {
+      await startDownload(
+        connection: conn,
+        connectionManager: cm,
+        remotePath: transfer.remotePath,
+        localPath: transfer.localPath,
+        fileName: transfer.fileName,
+        fileSize: transfer.fileSize,
+      );
+    } else {
+      await startUpload(
+        connection: conn,
+        connectionManager: cm,
+        remotePath: transfer.remotePath,
+        localPath: transfer.localPath,
+        fileName: transfer.fileName,
+        fileSize: transfer.fileSize,
+      );
+    }
+    return true;
   }
 
   /// Execute download

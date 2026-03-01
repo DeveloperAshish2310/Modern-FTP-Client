@@ -241,6 +241,9 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     final isDownload = transfer.type == TransferType.download;
     final statusColor = _statusColor(transfer.status);
     final statusIcon = _statusIcon(transfer.status);
+    final canRetry =
+        transfer.status == TransferStatus.failed ||
+        transfer.status == TransferStatus.cancelled;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -287,7 +290,7 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -310,6 +313,32 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
                   ],
                 ),
               ),
+              if (canRetry)
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 20),
+                  tooltip: 'Retry',
+                  onPressed: () async {
+                    final ok = await _transferService.retryTransfer(transfer);
+                    if (!mounted) return;
+                    if (ok) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Retrying: ${transfer.fileName}'),
+                        ),
+                      );
+                      _tabController.animateTo(0); // Switch to Active tab
+                      _loadHistory();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Cannot retry — connect to server first',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                ),
             ],
           ),
         ),
