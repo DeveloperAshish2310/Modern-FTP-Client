@@ -138,6 +138,7 @@ class ConnectionManager {
   Future<bool> downloadFile({
     required String remotePath,
     required String localPath,
+    bool Function()? isCancelled,
   }) async {
     if (!isConnected || _activeConnection == null) {
       throw Exception('Not connected');
@@ -154,6 +155,7 @@ class ConnectionManager {
         return await _sftpService!.downloadFile(
           remotePath: remotePath,
           localPath: localPath,
+          isCancelled: isCancelled,
         );
     }
   }

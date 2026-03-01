@@ -175,11 +175,12 @@ class SFTPService {
     }
   }
 
-  /// Download file
+  /// Download file using chunked streaming to avoid memory issues
   Future<bool> downloadFile({
     required String remotePath,
     required String localPath,
     Function(int, int)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     if (!_isConnected || _sftpClient == null) {
       throw Exception('Not connected to SFTP server');
@@ -200,44 +201,58 @@ class SFTPService {
       print('[SFTP] ===== DOWNLOAD START =====');
       print('[SFTP] Remote: $remotePath');
       print('[SFTP] Local: $localPath');
-      print('[SFTP] Server file size: $fileSize bytes');
+      print('[SFTP] File size: $fileSize bytes');
 
       if (fileSize == 0) {
-        // Create empty file
         await localFile.create();
-        print('[SFTP] Remote file is 0 bytes, creating empty local file');
+        print('[SFTP] Empty file created');
         return true;
       }
 
-      // Open remote file with explicit read mode
+      // Open remote file
       final remoteFile = await _sftpClient!.open(
         remotePath,
         mode: SftpFileOpenMode.read,
       );
 
-      // Read entire file content
-      final data = await remoteFile.readBytes(length: fileSize);
-      print('[SFTP] Read ${data.length} bytes from server');
+      // Stream chunks directly to disk
+      final sink = localFile.openWrite();
+      int downloaded = 0;
 
-      // Write to local file
-      await localFile.writeAsBytes(data);
+      try {
+        await for (final chunk in remoteFile.read()) {
+          // Check cancel between chunks
+          if (isCancelled != null && isCancelled()) {
+            print('[SFTP] Download cancelled by user');
+            await sink.close();
+            // Delete partial file
+            if (await localFile.exists()) await localFile.delete();
+            throw Exception('Cancelled');
+          }
 
-      // Verify file was actually written
+          sink.add(chunk);
+          downloaded += chunk.length;
+
+          if (onProgress != null && fileSize > 0) {
+            onProgress(downloaded, fileSize);
+          }
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+
       final writtenSize = await localFile.length();
-      print('[SFTP] Written to disk: $writtenSize bytes');
-      print('[SFTP] Path: $localPath');
+      print('[SFTP] Written: $writtenSize bytes');
       print('[SFTP] ===== DOWNLOAD COMPLETE =====');
 
       if (writtenSize == 0 && fileSize > 0) {
-        throw Exception(
-          'File downloaded but 0 bytes written (expected $fileSize)',
-        );
+        throw Exception('0 bytes written (expected $fileSize)');
       }
       return true;
     } catch (e) {
-      print('[SFTP] ===== DOWNLOAD ERROR =====');
-      print('[SFTP] Error: $e');
-      throw Exception('Download failed: $e');
+      print('[SFTP] ERROR: $e');
+      rethrow;
     }
   }
 

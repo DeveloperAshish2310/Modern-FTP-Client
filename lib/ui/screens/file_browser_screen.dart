@@ -342,36 +342,11 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     });
   }
 
-  /// Get the download directory - uses app's external storage which is always writable
+  /// Get the download directory in public Downloads
   Future<Directory> _getDownloadDir() async {
-    // Use app external dir as it's always writable without scoped storage issues
-    final extDir = await getExternalStorageDirectory();
-    if (extDir != null) {
-      final dlDir = Directory('${extDir.path}/Downloads');
-      if (!await dlDir.exists()) await dlDir.create(recursive: true);
-      return dlDir;
-    }
-    // Fallback
-    final tmpDir = await getTemporaryDirectory();
-    final dlDir = Directory('${tmpDir.path}/Downloads');
-    if (!await dlDir.exists()) await dlDir.create(recursive: true);
-    return dlDir;
-  }
-
-  /// Trigger Android MediaScanner so the file shows up in the file manager
-  Future<void> _scanFile(String path) async {
-    try {
-      // Use Android's media scan broadcast
-      await Process.run('am', [
-        'broadcast',
-        '-a',
-        'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
-        '-d',
-        'file://$path',
-      ]);
-    } catch (_) {
-      // Non-critical, file is still downloaded
-    }
+    final dir = Directory('/storage/emulated/0/Download/FTPClient');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
   }
 
   // --- Upload ---
@@ -479,14 +454,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     if (!await _ensureStoragePermission()) return;
 
-    String debugInfo = '';
     try {
       final downloadDir = await _getDownloadDir();
       final localPath = '${downloadDir.path}/${file.name}';
-      debugInfo += 'Target: $localPath\n';
-      debugInfo += 'Dir exists: ${await downloadDir.exists()}\n';
-      debugInfo += 'Remote: ${file.path}\n';
-      debugInfo += 'Size on server: ${file.size} bytes\n';
 
       // Check if local file already exists
       final localFile = File(localPath);
@@ -507,61 +477,32 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       await _connectionManager.downloadFile(
         remotePath: file.path,
         localPath: localPath,
+        isCancelled: () => _cancelRequested,
       );
 
       if (!mounted) return;
       setState(() => _isTransferring = false);
 
-      // Check if file actually exists now
-      final savedFile = File(localPath);
-      final exists = await savedFile.exists();
-      final size = exists ? await savedFile.length() : 0;
-      debugInfo += '\nAfter download:\n';
-      debugInfo += 'File exists: $exists\n';
-      debugInfo += 'File size: $size bytes\n';
-
-      if (exists && size > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Downloaded: ${file.name} ($size bytes)'),
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'OPEN',
-              onPressed: () => OpenFilex.open(localPath),
-            ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloaded: ${file.name}'),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'OPEN',
+            onPressed: () => OpenFilex.open(localPath),
           ),
-        );
-      } else {
-        // File not saved — show debug dialog
-        _showDebugDialog(
-          'Download Issue',
-          'File was not saved to disk.\n\n$debugInfo',
-        );
-      }
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isTransferring = false);
-      debugInfo += '\nError: $e';
-      _showDebugDialog('Download Failed', debugInfo);
+      final msg = e.toString().replaceAll('Exception: ', '');
+      if (!msg.contains('Cancelled')) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Download failed: $msg')));
+      }
     }
-  }
-
-  void _showDebugDialog(String title, String info) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: SelectableText(info, style: const TextStyle(fontSize: 12)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _downloadSelected() async {
@@ -600,16 +541,18 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
       try {
         final localPath = '${downloadDir.path}/${file.name}';
-        debugPrint('Batch download target: $localPath');
+        print('[DL] Batch: $localPath');
         await _connectionManager.downloadFile(
           remotePath: file.path,
           localPath: localPath,
+          isCancelled: () => _cancelRequested,
         );
         downloaded++;
         setState(() => _transferDone = downloaded + failed);
       } catch (e) {
+        if (e.toString().contains('Cancelled')) break;
         failed++;
-        debugPrint('Download failed for ${file.name}: $e');
+        print('[DL] Failed ${file.name}: $e');
       }
     }
 
