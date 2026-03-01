@@ -194,37 +194,43 @@ class SFTPService {
         await parentDir.create(recursive: true);
       }
 
-      final remoteFile = await _sftpClient!.open(remotePath);
-
-      // Get file size for progress tracking
+      // Get file size first
       final stat = await _sftpClient!.stat(remotePath);
       final fileSize = stat.size ?? 0;
+      debugPrint('SFTP downloading: $remotePath ($fileSize bytes)');
 
-      int downloaded = 0;
-      final sink = localFile.openWrite();
-
-      await for (final chunk in remoteFile.read()) {
-        sink.add(chunk);
-        downloaded += chunk.length;
-
-        if (onProgress != null && fileSize > 0) {
-          onProgress(downloaded, fileSize);
-        }
+      if (fileSize == 0) {
+        // Create empty file
+        await localFile.create();
+        debugPrint('SFTP: Remote file is 0 bytes, created empty local file');
+        return true;
       }
 
-      await sink.flush();
-      await sink.close();
+      // Open remote file with explicit read mode
+      final remoteFile = await _sftpClient!.open(
+        remotePath,
+        mode: SftpFileOpenMode.read,
+      );
+
+      // Read entire file content
+      final data = await remoteFile.readBytes(length: fileSize);
+      debugPrint('SFTP read ${data.length} bytes from server');
+
+      // Write to local file
+      await localFile.writeAsBytes(data);
 
       // Verify file was actually written
-      if (await localFile.exists()) {
-        final writtenSize = await localFile.length();
-        debugPrint(
-          'SFTP Download complete: $remotePath -> $localPath ($writtenSize bytes)',
+      final writtenSize = await localFile.length();
+      debugPrint(
+        'SFTP Download complete: $remotePath -> $localPath ($writtenSize bytes)',
+      );
+
+      if (writtenSize == 0 && fileSize > 0) {
+        throw Exception(
+          'File downloaded but 0 bytes written (expected $fileSize)',
         );
-        return true;
-      } else {
-        throw Exception('File was not saved to disk');
       }
+      return true;
     } catch (e) {
       debugPrint('SFTP Download Error: $e');
       throw Exception('Download failed: $e');

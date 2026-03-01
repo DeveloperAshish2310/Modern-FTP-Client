@@ -479,10 +479,14 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     if (!await _ensureStoragePermission()) return;
 
+    String debugInfo = '';
     try {
       final downloadDir = await _getDownloadDir();
       final localPath = '${downloadDir.path}/${file.name}';
-      debugPrint('Download target: $localPath');
+      debugInfo += 'Target: $localPath\n';
+      debugInfo += 'Dir exists: ${await downloadDir.exists()}\n';
+      debugInfo += 'Remote: ${file.path}\n';
+      debugInfo += 'Size on server: ${file.size} bytes\n';
 
       // Check if local file already exists
       final localFile = File(localPath);
@@ -505,32 +509,59 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         localPath: localPath,
       );
 
-      // Notify Android MediaScanner so file appears in file manager
-      await _scanFile(localPath);
-
       if (!mounted) return;
       setState(() => _isTransferring = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Downloaded: ${file.name}'),
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'OPEN',
-            onPressed: () => OpenFilex.open(localPath),
+
+      // Check if file actually exists now
+      final savedFile = File(localPath);
+      final exists = await savedFile.exists();
+      final size = exists ? await savedFile.length() : 0;
+      debugInfo += '\nAfter download:\n';
+      debugInfo += 'File exists: $exists\n';
+      debugInfo += 'File size: $size bytes\n';
+
+      if (exists && size > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Downloaded: ${file.name} ($size bytes)'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'OPEN',
+              onPressed: () => OpenFilex.open(localPath),
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        // File not saved — show debug dialog
+        _showDebugDialog(
+          'Download Issue',
+          'File was not saved to disk.\n\n$debugInfo',
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isTransferring = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Download failed: ${e.toString().replaceAll('Exception: ', '')}',
-          ),
-        ),
-      );
+      debugInfo += '\nError: $e';
+      _showDebugDialog('Download Failed', debugInfo);
     }
+  }
+
+  void _showDebugDialog(String title, String info) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: SelectableText(info, style: const TextStyle(fontSize: 12)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _downloadSelected() async {
