@@ -25,8 +25,9 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadHistory();
     _transferService.addListener(_onTransferUpdate);
+    // Defer DB load so the screen renders immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
   }
 
   @override
@@ -36,11 +37,20 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     super.dispose();
   }
 
+  DateTime _lastUIUpdate = DateTime.now();
+
   void _onTransferUpdate() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final now = DateTime.now();
+    // Throttle: max 2 rebuilds/sec
+    if (now.difference(_lastUIUpdate).inMilliseconds >= 500) {
+      _lastUIUpdate = now;
+      setState(() {});
+    }
   }
 
   Future<void> _loadHistory() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     final rows = await _db.getTransferHistory(limit: 200);
     if (!mounted) return;
