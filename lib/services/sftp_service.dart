@@ -197,12 +197,15 @@ class SFTPService {
       // Get file size first
       final stat = await _sftpClient!.stat(remotePath);
       final fileSize = stat.size ?? 0;
-      debugPrint('SFTP downloading: $remotePath ($fileSize bytes)');
+      print('[SFTP] ===== DOWNLOAD START =====');
+      print('[SFTP] Remote: $remotePath');
+      print('[SFTP] Local: $localPath');
+      print('[SFTP] Server file size: $fileSize bytes');
 
       if (fileSize == 0) {
         // Create empty file
         await localFile.create();
-        debugPrint('SFTP: Remote file is 0 bytes, created empty local file');
+        print('[SFTP] Remote file is 0 bytes, creating empty local file');
         return true;
       }
 
@@ -214,16 +217,16 @@ class SFTPService {
 
       // Read entire file content
       final data = await remoteFile.readBytes(length: fileSize);
-      debugPrint('SFTP read ${data.length} bytes from server');
+      print('[SFTP] Read ${data.length} bytes from server');
 
       // Write to local file
       await localFile.writeAsBytes(data);
 
       // Verify file was actually written
       final writtenSize = await localFile.length();
-      debugPrint(
-        'SFTP Download complete: $remotePath -> $localPath ($writtenSize bytes)',
-      );
+      print('[SFTP] Written to disk: $writtenSize bytes');
+      print('[SFTP] Path: $localPath');
+      print('[SFTP] ===== DOWNLOAD COMPLETE =====');
 
       if (writtenSize == 0 && fileSize > 0) {
         throw Exception(
@@ -232,7 +235,8 @@ class SFTPService {
       }
       return true;
     } catch (e) {
-      debugPrint('SFTP Download Error: $e');
+      print('[SFTP] ===== DOWNLOAD ERROR =====');
+      print('[SFTP] Error: $e');
       throw Exception('Download failed: $e');
     }
   }
