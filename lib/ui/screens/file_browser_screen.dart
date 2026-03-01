@@ -55,6 +55,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   String? _errorMessage;
   String _currentPath = '/';
 
+  // Directory cache for instant back navigation
+  final Map<String, List<FileItemModel>> _dirCache = {};
+
+  void _invalidateCache([String? path]) {
+    if (path != null) {
+      _dirCache.remove(path);
+    } else {
+      _dirCache.remove(_currentPath);
+    }
+  }
+
+  DateTime _lastProgressUpdate = DateTime.now();
+
   // Sort
   _SortMode _sortMode = _SortMode.nameAsc;
 
@@ -152,7 +165,18 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
   }
 
-  Future<void> _loadDirectory(String path) async {
+  Future<void> _loadDirectory(String path, {bool useCache = false}) async {
+    // Use cached listing for instant back navigation
+    if (useCache && _dirCache.containsKey(path)) {
+      setState(() {
+        _files = _dirCache[path]!;
+        _currentPath = path;
+        _isConnecting = false;
+        _isLoading = false;
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -163,6 +187,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (!mounted) return;
 
       _sortFiles(files);
+      _dirCache[path] = files;
 
       setState(() {
         _files = files;
@@ -189,7 +214,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   void _navigateUp() {
     if (_pathHistory.length > 1) {
       _pathHistory.removeLast();
-      _loadDirectory(_pathHistory.last);
+      _loadDirectory(_pathHistory.last, useCache: true);
     }
   }
 
@@ -460,6 +485,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), duration: const Duration(seconds: 4)),
       );
+      _invalidateCache();
       _loadDirectory(_currentPath);
     } catch (e) {
       if (!mounted) return;
@@ -507,7 +533,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         remotePath: file.path,
         localPath: localPath,
         onProgress: (downloaded, total) {
-          if (mounted) setState(() => _transferredBytes = downloaded);
+          final now = DateTime.now();
+          if (mounted &&
+              now.difference(_lastProgressUpdate).inMilliseconds >= 150) {
+            _lastProgressUpdate = now;
+            setState(() => _transferredBytes = downloaded);
+          }
         },
         isCancelled: () => _cancelRequested,
       );
@@ -602,7 +633,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           localPath: localPath,
           isCancelled: () => _cancelRequested,
           onProgress: (dl, total) {
-            if (mounted) setState(() => _transferredBytes = bytesBefore + dl);
+            final now = DateTime.now();
+            if (mounted &&
+                now.difference(_lastProgressUpdate).inMilliseconds >= 150) {
+              _lastProgressUpdate = now;
+              setState(() => _transferredBytes = bytesBefore + dl);
+            }
           },
         );
         downloaded++;
@@ -698,6 +734,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         ),
       ),
     );
+    _invalidateCache();
     _loadDirectory(_currentPath);
   }
 
@@ -833,6 +870,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(parts.join(', '))));
+    _invalidateCache();
     _loadDirectory(_currentPath);
   }
 
@@ -1675,6 +1713,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   name,
                 );
                 if (result && mounted) {
+                  _invalidateCache();
                   _loadDirectory(_currentPath);
                 } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1716,6 +1755,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   name,
                 );
                 if (result && mounted) {
+                  _invalidateCache();
                   _loadDirectory(_currentPath);
                 } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1758,6 +1798,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   newPath,
                 );
                 if (result && mounted) {
+                  _invalidateCache();
                   _loadDirectory(_currentPath);
                 } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1794,6 +1835,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                 result = await _connectionManager.deleteFile(file.path);
               }
               if (result && mounted) {
+                _invalidateCache();
                 _loadDirectory(_currentPath);
               } else if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(

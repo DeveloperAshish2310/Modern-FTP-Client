@@ -221,10 +221,7 @@ class SFTPService {
       // Get file size first
       final stat = await _sftpClient!.stat(remotePath);
       final fileSize = stat.size ?? 0;
-      print('[SFTP] ===== DOWNLOAD START =====');
-      print('[SFTP] Remote: $remotePath');
-      print('[SFTP] Local: $localPath');
-      print('[SFTP] File size: $fileSize bytes');
+      print('[SFTP] Download: $remotePath ($fileSize bytes)');
 
       if (fileSize == 0) {
         await localFile.create();
@@ -241,14 +238,13 @@ class SFTPService {
       // Stream chunks directly to disk
       final sink = localFile.openWrite();
       int downloaded = 0;
+      DateTime lastProgress = DateTime.now();
 
       try {
         await for (final chunk in remoteFile.read()) {
           // Check cancel between chunks
           if (isCancelled != null && isCancelled()) {
-            print('[SFTP] Download cancelled by user');
             await sink.close();
-            // Delete partial file
             if (await localFile.exists()) await localFile.delete();
             throw Exception('Cancelled');
           }
@@ -256,8 +252,14 @@ class SFTPService {
           sink.add(chunk);
           downloaded += chunk.length;
 
+          // Throttle progress updates to max once per 100ms
           if (onProgress != null && fileSize > 0) {
-            onProgress(downloaded, fileSize);
+            final now = DateTime.now();
+            if (now.difference(lastProgress).inMilliseconds >= 100 ||
+                downloaded >= fileSize) {
+              lastProgress = now;
+              onProgress(downloaded, fileSize);
+            }
           }
         }
       } finally {
