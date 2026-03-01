@@ -566,6 +566,10 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Future<void> _paste() async {
     if (_clipboard == null) return;
 
+    final actionName = _clipboard!.action == _ClipboardAction.move
+        ? 'Moved'
+        : 'Copied';
+
     setState(() {
       _isTransferring = true;
       _transferStatus = 'Pasting...';
@@ -573,13 +577,32 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     int succeeded = 0;
     int failed = 0;
+    int skipped = 0;
 
     for (final file in _clipboard!.files) {
       final newPath = '$_currentPath/${file.name}';
 
       try {
+        // Check if file already exists at destination
+        bool fileExists = false;
+        try {
+          fileExists = await _connectionManager.exists(newPath);
+        } catch (_) {}
+
+        if (fileExists) {
+          if (!mounted) return;
+          final overwrite = await _askOverwrite(file.name);
+          if (!overwrite) {
+            skipped++;
+            continue;
+          }
+          // Delete existing file at destination
+          try {
+            await _connectionManager.deleteFile(newPath);
+          } catch (_) {}
+        }
+
         if (_clipboard!.action == _ClipboardAction.move) {
-          // Move = rename to new path
           final result = await _connectionManager.rename(file.path, newPath);
           result ? succeeded++ : failed++;
         } else {
@@ -588,7 +611,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           final tempPath = '${tempDir.path}/${file.name}';
 
           if (file.isDirectory) {
-            // Can't easily copy directories, skip
             failed++;
             continue;
           }
@@ -620,16 +642,14 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       _clipboard = null;
     });
 
-    final actionName = _clipboard?.action == _ClipboardAction.move
-        ? 'Moved'
-        : 'Copied';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$actionName $succeeded item(s)${failed > 0 ? ', $failed failed' : ''}',
-        ),
-      ),
-    );
+    final parts = <String>[];
+    if (succeeded > 0) parts.add('$actionName $succeeded');
+    if (skipped > 0) parts.add('$skipped skipped');
+    if (failed > 0) parts.add('$failed failed');
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(parts.join(', '))));
     _loadDirectory(_currentPath);
   }
 
