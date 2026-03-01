@@ -20,6 +20,7 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
   late TextEditingController _usernameController;
   late TextEditingController _passwordController;
   late TextEditingController _sshKeyController;
+  late TextEditingController _remoteDirController;
 
   ConnectionProtocol _selectedProtocol = ConnectionProtocol.ftp;
   bool _obscurePassword = true;
@@ -50,6 +51,9 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
     _sshKeyController = TextEditingController(
       text: widget.connection?.sshKeyPath ?? '',
     );
+    _remoteDirController = TextEditingController(
+      text: widget.connection?.remoteDirectory ?? '/',
+    );
 
     if (widget.connection != null) {
       _selectedProtocol = widget.connection!.protocol;
@@ -64,6 +68,7 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
     _usernameController.dispose();
     _passwordController.dispose();
     _sshKeyController.dispose();
+    _remoteDirController.dispose();
     super.dispose();
   }
 
@@ -267,6 +272,18 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
                 'Additional settings like timeout and encoding can be added here.',
               ),
               const SizedBox(height: 16),
+              // Remote Directory
+              TextFormField(
+                controller: _remoteDirController,
+                decoration: const InputDecoration(
+                  labelText: 'Remote Directory',
+                  hintText: '/',
+                  prefixIcon: Icon(Icons.folder),
+                  helperText:
+                      'Initial directory to open. Falls back to / if invalid.',
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
 
             const SizedBox(height: 24),
@@ -306,6 +323,9 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
         sshKeyPath: _sshKeyController.text.isEmpty
             ? null
             : _sshKeyController.text,
+        remoteDirectory: _remoteDirController.text.trim().isEmpty
+            ? '/'
+            : _remoteDirController.text.trim(),
         createdAt: widget.connection?.createdAt ?? DateTime.now(),
         isFavorite: widget.connection?.isFavorite ?? false,
       );

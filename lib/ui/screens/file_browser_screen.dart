@@ -14,6 +14,16 @@ import '../../services/connection_manager.dart';
 /// Clipboard action for copy/move operations
 enum _ClipboardAction { copy, move }
 
+enum _SortMode {
+  nameAsc,
+  nameDesc,
+  sizeAsc,
+  sizeDesc,
+  dateAsc,
+  dateDesc,
+  typeAsc,
+}
+
 class _ClipboardData {
   final List<FileItemModel> files;
   final _ClipboardAction action;
@@ -44,6 +54,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   String? _errorMessage;
   String _currentPath = '/';
 
+  // Sort
+  _SortMode _sortMode = _SortMode.nameAsc;
+
   // Multi-select
   bool _isSelectionMode = false;
   final Set<String> _selectedPaths = {};
@@ -55,6 +68,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   bool _isTransferring = false;
   String _transferStatus = '';
   bool _cancelRequested = false;
+  int _transferDone = 0;
+  int _transferTotal = 0;
 
   @override
   void initState() {
@@ -91,6 +106,17 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           context,
           listen: false,
         ).updateLastUsed(widget.connection.id!);
+
+        // Try remote directory first, fallback to /
+        final initialDir = widget.connection.remoteDirectory;
+        if (initialDir != '/') {
+          try {
+            await _loadDirectory(initialDir);
+            return;
+          } catch (_) {
+            // Path invalid, fallback
+          }
+        }
         await _loadDirectory('/');
       } else {
         setState(() {
@@ -119,11 +145,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       final files = await _connectionManager.listDirectory(path);
       if (!mounted) return;
 
-      files.sort((a, b) {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
+      _sortFiles(files);
 
       setState(() {
         _files = files;
@@ -152,6 +174,81 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       _pathHistory.removeLast();
       _loadDirectory(_pathHistory.last);
     }
+  }
+
+  void _sortFiles(List<FileItemModel> files) {
+    files.sort((a, b) {
+      // Directories always first
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+
+      switch (_sortMode) {
+        case _SortMode.nameAsc:
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        case _SortMode.nameDesc:
+          return b.name.toLowerCase().compareTo(a.name.toLowerCase());
+        case _SortMode.sizeAsc:
+          return a.size.compareTo(b.size);
+        case _SortMode.sizeDesc:
+          return b.size.compareTo(a.size);
+        case _SortMode.dateAsc:
+          return (a.modifiedDate ?? DateTime(2000)).compareTo(
+            b.modifiedDate ?? DateTime(2000),
+          );
+        case _SortMode.dateDesc:
+          return (b.modifiedDate ?? DateTime(2000)).compareTo(
+            a.modifiedDate ?? DateTime(2000),
+          );
+        case _SortMode.typeAsc:
+          final extA = a.name.contains('.') ? a.name.split('.').last : '';
+          final extB = b.name.contains('.') ? b.name.split('.').last : '';
+          return extA.compareTo(extB);
+      }
+    });
+  }
+
+  void _showSortDialog() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Sort by',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            _sortTile(ctx, 'Name (A → Z)', _SortMode.nameAsc),
+            _sortTile(ctx, 'Name (Z → A)', _SortMode.nameDesc),
+            _sortTile(ctx, 'Size (Smallest)', _SortMode.sizeAsc),
+            _sortTile(ctx, 'Size (Largest)', _SortMode.sizeDesc),
+            _sortTile(ctx, 'Date (Oldest)', _SortMode.dateAsc),
+            _sortTile(ctx, 'Date (Newest)', _SortMode.dateDesc),
+            _sortTile(ctx, 'Type', _SortMode.typeAsc),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sortTile(BuildContext ctx, String label, _SortMode mode) {
+    return ListTile(
+      title: Text(label),
+      trailing: _sortMode == mode
+          ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+          : null,
+      onTap: () {
+        Navigator.pop(ctx);
+        setState(() {
+          _sortMode = mode;
+          _sortFiles(_files);
+        });
+      },
+    );
   }
 
   // --- Selection ---
@@ -253,7 +350,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       setState(() {
         _isTransferring = true;
         _cancelRequested = false;
-        _transferStatus = 'Uploading 0/${result.files.length}...';
+        _transferDone = 0;
+        _transferTotal = result.files.length;
+        _transferStatus = 'Uploading...';
       });
 
       int uploaded = 0;
@@ -266,8 +365,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         if (file.path == null) continue;
 
         setState(() {
-          _transferStatus =
-              'Uploading ${uploaded + 1}/${result.files.length}: ${file.name}';
+          _transferDone = uploaded + skipped + failed;
+          _transferStatus = 'Uploading: ${file.name}';
         });
 
         try {
@@ -302,6 +401,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             remotePath: remotePath,
           );
           uploaded++;
+          setState(() => _transferDone = uploaded + skipped + failed);
         } catch (e) {
           failed++;
           lastError = e.toString().replaceAll('Exception: ', '');
@@ -365,6 +465,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       setState(() {
         _isTransferring = true;
         _cancelRequested = false;
+        _transferDone = 0;
+        _transferTotal = 1;
         _transferStatus = 'Downloading: ${file.name}';
       });
 
@@ -407,7 +509,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     setState(() {
       _isTransferring = true;
       _cancelRequested = false;
-      _transferStatus = 'Downloading 0/${files.length}...';
+      _transferDone = 0;
+      _transferTotal = files.length;
+      _transferStatus = 'Downloading...';
     });
 
     int downloaded = 0;
@@ -422,8 +526,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (_cancelRequested) break;
 
       setState(() {
-        _transferStatus =
-            'Downloading ${downloaded + 1}/${files.length}: ${file.name}';
+        _transferDone = downloaded + failed;
+        _transferStatus = 'Downloading: ${file.name}';
       });
 
       try {
@@ -433,6 +537,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           localPath: localPath,
         );
         downloaded++;
+        setState(() => _transferDone = downloaded + failed);
       } catch (e) {
         failed++;
         debugPrint('Download failed for ${file.name}: $e');
@@ -767,6 +872,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   ),
                 ),
               const PopupMenuItem(
+                value: 'sort',
+                child: ListTile(
+                  leading: Icon(Icons.sort),
+                  title: Text('Sort'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
                 value: 'disconnect',
                 child: ListTile(
                   leading: Icon(Icons.link_off, color: Colors.red),
@@ -789,6 +903,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   break;
                 case 'paste':
                   _paste();
+                  break;
+                case 'sort':
+                  _showSortDialog();
                   break;
                 case 'disconnect':
                   _connectionManager.disconnect();
@@ -873,27 +990,47 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Widget _buildBody() {
     // Transfer overlay
     if (_isTransferring) {
+      final pct = _transferTotal > 0
+          ? (_transferDone / _transferTotal * 100).round()
+          : 0;
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_transferTotal > 0) ...[
+                Text(
+                  '$_transferDone / $_transferTotal files',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: _transferTotal > 0
+                      ? _transferDone / _transferTotal
+                      : null,
+                ),
+                const SizedBox(height: 8),
+                Text('$pct%', style: Theme.of(context).textTheme.bodyLarge),
+              ] else
+                const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
                 _transferStatus,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.cancel, color: Colors.red),
-              label: const Text('Cancel', style: TextStyle(color: Colors.red)),
-              onPressed: _cancelRequested ? null : _cancelTransfer,
-            ),
-          ],
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.cancel, color: Colors.red),
+                label: const Text(
+                  'Cancel',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onPressed: _cancelRequested ? null : _cancelTransfer,
+              ),
+            ],
+          ),
         ),
       );
     }

@@ -9,6 +9,7 @@ class ConnectionModel {
   final ConnectionProtocol protocol;
   final bool isFavorite;
   final String? sshKeyPath;
+  final String remoteDirectory;
   final DateTime createdAt;
   final DateTime? lastUsed;
 
@@ -22,6 +23,7 @@ class ConnectionModel {
     required this.protocol,
     this.isFavorite = false,
     this.sshKeyPath,
+    this.remoteDirectory = '/',
     required this.createdAt,
     this.lastUsed,
   });
@@ -38,6 +40,7 @@ class ConnectionModel {
       'protocol': protocol.name,
       'is_favorite': isFavorite ? 1 : 0,
       'ssh_key_path': sshKeyPath,
+      'remote_directory': remoteDirectory,
       'created_at': createdAt.millisecondsSinceEpoch,
       'last_used': lastUsed?.millisecondsSinceEpoch,
     };
@@ -58,6 +61,7 @@ class ConnectionModel {
       ),
       isFavorite: (map['is_favorite'] as int) == 1,
       sshKeyPath: map['ssh_key_path'] as String?,
+      remoteDirectory: (map['remote_directory'] as String?) ?? '/',
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
       lastUsed: map['last_used'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['last_used'] as int)
@@ -76,6 +80,7 @@ class ConnectionModel {
     ConnectionProtocol? protocol,
     bool? isFavorite,
     String? sshKeyPath,
+    String? remoteDirectory,
     DateTime? createdAt,
     DateTime? lastUsed,
   }) {
@@ -89,6 +94,7 @@ class ConnectionModel {
       protocol: protocol ?? this.protocol,
       isFavorite: isFavorite ?? this.isFavorite,
       sshKeyPath: sshKeyPath ?? this.sshKeyPath,
+      remoteDirectory: remoteDirectory ?? this.remoteDirectory,
       createdAt: createdAt ?? this.createdAt,
       lastUsed: lastUsed ?? this.lastUsed,
     );

@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: AppConstants.dbVersion,
+      version: 2,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -41,6 +41,7 @@ class DatabaseHelper {
         protocol TEXT NOT NULL,
         is_favorite INTEGER DEFAULT 0,
         ssh_key_path TEXT,
+        remote_directory TEXT DEFAULT '/',
         created_at INTEGER NOT NULL,
         last_used INTEGER
       )
@@ -94,7 +95,11 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Handle database migrations in future versions
+    if (oldVersion < 2) {
+      await db.execute(
+        'ALTER TABLE connections ADD COLUMN remote_directory TEXT DEFAULT "/"',
+      );
+    }
   }
 
   // Connection CRUD operations
