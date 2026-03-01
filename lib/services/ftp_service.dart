@@ -163,9 +163,17 @@ class FTPService {
     try {
       final localFile = File(localPath);
 
-      // Download with progress callback
-      final result = await _ftpConnect!.downloadFile(remotePath, localFile);
+      // Extract directory and filename from remote path
+      final lastSlash = remotePath.lastIndexOf('/');
+      final dir = lastSlash > 0 ? remotePath.substring(0, lastSlash) : '/';
+      final fileName = lastSlash >= 0
+          ? remotePath.substring(lastSlash + 1)
+          : remotePath;
 
+      // Navigate to the correct directory first
+      await _ftpConnect!.changeDirectory(dir);
+
+      final result = await _ftpConnect!.downloadFile(fileName, localFile);
       return result;
     } catch (e) {
       debugPrint('FTP Download Error: $e');
@@ -190,9 +198,13 @@ class FTPService {
         throw Exception('Local file does not exist');
       }
 
-      // Upload with progress callback
-      final result = await _ftpConnect!.uploadFile(localFile);
+      // Extract directory from remote path and navigate there
+      final lastSlash = remotePath.lastIndexOf('/');
+      final dir = lastSlash > 0 ? remotePath.substring(0, lastSlash) : '/';
 
+      await _ftpConnect!.changeDirectory(dir);
+
+      final result = await _ftpConnect!.uploadFile(localFile);
       return result;
     } catch (e) {
       debugPrint('FTP Upload Error: $e');

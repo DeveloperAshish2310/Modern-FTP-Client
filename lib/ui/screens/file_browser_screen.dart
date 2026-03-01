@@ -54,6 +54,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   // Transfer progress
   bool _isTransferring = false;
   String _transferStatus = '';
+  bool _cancelRequested = false;
 
   @override
   void initState() {
@@ -188,21 +189,82 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   List<FileItemModel> get _selectedFiles =>
       _files.where((f) => _selectedPaths.contains(f.path)).toList();
 
+  // --- Storage permission helper ---
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+
+    var status = await Permission.manageExternalStorage.status;
+    if (status.isGranted) return true;
+
+    status = await Permission.manageExternalStorage.request();
+    if (status.isGranted) return true;
+
+    // Fallback to regular storage permission
+    status = await Permission.storage.request();
+    if (status.isGranted) return true;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Storage permission is required. Please grant it in Settings.',
+          ),
+        ),
+      );
+    }
+    return false;
+  }
+
+  // --- Overwrite prompt ---
+  Future<bool> _askOverwrite(String fileName) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('File Exists'),
+        content: Text('"$fileName" already exists. Overwrite?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Overwrite'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  void _cancelTransfer() {
+    setState(() {
+      _cancelRequested = true;
+      _transferStatus = 'Cancelling...';
+    });
+  }
+
   // --- Upload ---
   Future<void> _uploadFiles() async {
     try {
+      // Request permission BEFORE picking files
+      if (!await _ensureStoragePermission()) return;
+
       final result = await FilePicker.platform.pickFiles(allowMultiple: true);
       if (result == null || result.files.isEmpty) return;
 
       setState(() {
         _isTransferring = true;
+        _cancelRequested = false;
         _transferStatus = 'Uploading 0/${result.files.length}...';
       });
 
       int uploaded = 0;
       int failed = 0;
+      int skipped = 0;
 
       for (final file in result.files) {
+        if (_cancelRequested) break;
         if (file.path == null) continue;
 
         setState(() {
@@ -212,6 +274,20 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
         try {
           final remotePath = '$_currentPath/${file.name}';
+
+          // Check if file exists on server
+          final exists = await _connectionManager
+              .exists(remotePath)
+              .catchError((_) => false);
+          if (exists) {
+            if (!mounted) return;
+            final overwrite = await _askOverwrite(file.name);
+            if (!overwrite) {
+              skipped++;
+              continue;
+            }
+          }
+
           await _connectionManager.uploadFile(
             localPath: file.path!,
             remotePath: remotePath,
@@ -226,13 +302,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       if (!mounted) return;
       setState(() => _isTransferring = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Uploaded $uploaded file(s)${failed > 0 ? ', $failed failed' : ''}',
-          ),
-        ),
-      );
+      final parts = <String>[];
+      if (uploaded > 0) parts.add('$uploaded uploaded');
+      if (skipped > 0) parts.add('$skipped skipped');
+      if (failed > 0) parts.add('$failed failed');
+      if (_cancelRequested) parts.add('cancelled');
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(parts.join(', '))));
       _loadDirectory(_currentPath);
     } catch (e) {
       if (!mounted) return;
@@ -247,24 +325,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   Future<void> _downloadFile(FileItemModel file) async {
     if (file.isDirectory) return;
 
-    // Request storage permissions
-    if (Platform.isAndroid) {
-      final status = await Permission.manageExternalStorage.request();
-      if (!status.isGranted) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Storage permission required for downloads'),
-          ),
-        );
-        return;
-      }
-    }
-
-    setState(() {
-      _isTransferring = true;
-      _transferStatus = 'Downloading: ${file.name}';
-    });
+    if (!await _ensureStoragePermission()) return;
 
     try {
       final downloadDir = Directory('/storage/emulated/0/Download/FTPClient');
@@ -273,6 +334,20 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       }
 
       final localPath = '${downloadDir.path}/${file.name}';
+
+      // Check if local file already exists
+      final localFile = File(localPath);
+      if (await localFile.exists()) {
+        if (!mounted) return;
+        final overwrite = await _askOverwrite(file.name);
+        if (!overwrite) return;
+      }
+
+      setState(() {
+        _isTransferring = true;
+        _cancelRequested = false;
+        _transferStatus = 'Downloading: ${file.name}';
+      });
 
       await _connectionManager.downloadFile(
         remotePath: file.path,
@@ -308,19 +383,11 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       return;
     }
 
-    if (Platform.isAndroid) {
-      final status = await Permission.manageExternalStorage.request();
-      if (!status.isGranted) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Storage permission required')),
-        );
-        return;
-      }
-    }
+    if (!await _ensureStoragePermission()) return;
 
     setState(() {
       _isTransferring = true;
+      _cancelRequested = false;
       _transferStatus = 'Downloading 0/${files.length}...';
     });
 
@@ -333,6 +400,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
 
     for (final file in files) {
+      if (_cancelRequested) break;
+
       setState(() {
         _transferStatus =
             'Downloading ${downloaded + 1}/${files.length}: ${file.name}';
@@ -358,7 +427,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}',
+          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
         ),
       ),
     );
@@ -771,14 +840,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 24),
-            Text(
-              _transferStatus,
-              style: Theme.of(context).textTheme.titleMedium,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                _transferStatus,
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Please wait...',
-              style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.cancel, color: Colors.red),
+              label: const Text('Cancel', style: TextStyle(color: Colors.red)),
+              onPressed: _cancelRequested ? null : _cancelTransfer,
             ),
           ],
         ),
