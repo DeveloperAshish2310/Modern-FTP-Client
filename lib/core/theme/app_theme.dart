@@ -135,7 +135,7 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        contentTextStyle: const TextStyle(fontSize: 14),
+        contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
         insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
 

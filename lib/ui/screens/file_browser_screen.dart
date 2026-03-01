@@ -6,13 +6,14 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:open_filex/open_filex.dart';
 import '../../models/connection_model.dart';
 import '../../models/file_item_model.dart';
 import '../../models/transfer_model.dart';
 import '../../providers/connection_provider.dart';
 import '../../services/connection_manager.dart';
+import '../../services/transfer_service.dart';
 import '../../core/database/database_helper.dart';
+import 'transfer_manager_screen.dart';
 
 /// Clipboard action for copy/move operations
 enum _ClipboardAction { copy, move }
@@ -68,7 +69,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
   }
 
-  DateTime _lastProgressUpdate = DateTime.now();
   final DatabaseHelper _dbHelper = DatabaseHelper();
 
   void _recordTransfer({
@@ -562,72 +562,40 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         if (!overwrite) return;
       }
 
-      setState(() {
-        _isTransferring = true;
-        _cancelRequested = false;
-        _fileDone = 0;
-        _fileTotal = 1;
-        _transferredBytes = 0;
-        _totalBytes = file.size;
-        _transferStartTime = DateTime.now();
-        _transferStatus = 'Downloading: ${file.name}';
-      });
-
-      await _connectionManager.downloadFile(
+      // Start background download via TransferService
+      final transferService = TransferService();
+      await transferService.startDownload(
+        connection: widget.connection,
+        connectionManager: _connectionManager,
         remotePath: file.path,
         localPath: localPath,
-        onProgress: (downloaded, total) {
-          final now = DateTime.now();
-          if (mounted &&
-              now.difference(_lastProgressUpdate).inMilliseconds >= 150) {
-            _lastProgressUpdate = now;
-            setState(() => _transferredBytes = downloaded);
-          }
-        },
-        isCancelled: () => _cancelRequested,
+        fileName: file.name,
+        fileSize: file.size,
       );
 
       if (!mounted) return;
-      setState(() => _isTransferring = false);
-
-      _recordTransfer(
-        fileName: file.name,
-        localPath: localPath,
-        remotePath: file.path,
-        fileSize: file.size,
-        type: TransferType.download,
-        status: TransferStatus.completed,
-      );
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Downloaded: ${file.name}'),
-          duration: const Duration(seconds: 5),
+          content: Text('Downloading: ${file.name}'),
+          duration: const Duration(seconds: 2),
           action: SnackBarAction(
-            label: 'OPEN',
-            onPressed: () => OpenFilex.open(localPath),
+            label: 'VIEW',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TransferManagerScreen()),
+            ),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isTransferring = false);
-      final msg = e.toString().replaceAll('Exception: ', '');
-      final isCancelled = msg.contains('Cancelled');
-      _recordTransfer(
-        fileName: file.name,
-        localPath: '',
-        remotePath: file.path,
-        fileSize: file.size,
-        type: TransferType.download,
-        status: isCancelled ? TransferStatus.cancelled : TransferStatus.failed,
-        errorMessage: isCancelled ? null : msg,
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Download error: ${e.toString().replaceAll("Exception: ", "")}',
+          ),
+        ),
       );
-      if (!isCancelled) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $msg')));
-      }
     }
   }
 
@@ -644,92 +612,52 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     if (!await _ensureStoragePermission()) return;
 
-    // Calculate total size
-    int totalSize = 0;
-    for (final f in files) {
-      totalSize += f.size;
-    }
-
-    setState(() {
-      _isTransferring = true;
-      _cancelRequested = false;
-      _fileDone = 0;
-      _fileTotal = files.length;
-      _transferredBytes = 0;
-      _totalBytes = totalSize;
-      _transferStartTime = DateTime.now();
-      _transferStatus = 'Downloading...';
-    });
-
-    int downloaded = 0;
-    int failed = 0;
+    final downloadDir = await _getDownloadDir();
+    final transferService = TransferService();
+    int queued = 0;
     int skipped = 0;
 
-    final downloadDir = await _getDownloadDir();
-
     for (final file in files) {
-      if (_cancelRequested) break;
+      final localPath = '${downloadDir.path}/${file.name}';
 
-      setState(() {
-        _fileDone = downloaded + failed + skipped;
-        _transferStatus = 'Downloading: ${file.name}';
-      });
-
-      try {
-        final localPath = '${downloadDir.path}/${file.name}';
-
-        // Check if local file already exists
-        final localFile = File(localPath);
-        if (await localFile.exists()) {
-          if (!mounted) return;
-          final overwrite = await _askOverwrite(file.name);
-          if (!overwrite) {
-            skipped++;
-            continue;
-          }
+      // Check if local file already exists
+      final localFile = File(localPath);
+      if (await localFile.exists()) {
+        if (!mounted) return;
+        final overwrite = await _askOverwrite(file.name);
+        if (!overwrite) {
+          skipped++;
+          continue;
         }
-
-        print('[DL] Batch: $localPath');
-        final bytesBefore = _transferredBytes;
-        await _connectionManager.downloadFile(
-          remotePath: file.path,
-          localPath: localPath,
-          isCancelled: () => _cancelRequested,
-          onProgress: (dl, total) {
-            final now = DateTime.now();
-            if (mounted &&
-                now.difference(_lastProgressUpdate).inMilliseconds >= 150) {
-              _lastProgressUpdate = now;
-              setState(() => _transferredBytes = bytesBefore + dl);
-            }
-          },
-        );
-        downloaded++;
-        setState(() => _fileDone = downloaded + failed + skipped);
-      } catch (e) {
-        if (e.toString().contains('Cancelled')) break;
-        failed++;
-        print('[DL] Failed ${file.name}: $e');
       }
+
+      await transferService.startDownload(
+        connection: widget.connection,
+        connectionManager: _connectionManager,
+        remotePath: file.path,
+        localPath: localPath,
+        fileName: file.name,
+        fileSize: file.size,
+      );
+      queued++;
     }
 
     if (!mounted) return;
-    setState(() => _isTransferring = false);
     _exitSelectionMode();
 
-    final dirPath = downloadDir.path;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
+          'Queued $queued download(s)${skipped > 0 ? ', $skipped skipped' : ''}',
         ),
-        duration: const Duration(seconds: 5),
-        action: downloaded > 0
-            ? SnackBarAction(
-                label: 'OPEN FOLDER',
-                onPressed: () => OpenFilex.open(dirPath),
-              )
-            : null,
+        duration: const Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'VIEW',
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const TransferManagerScreen()),
+          ),
+        ),
       ),
     );
   }

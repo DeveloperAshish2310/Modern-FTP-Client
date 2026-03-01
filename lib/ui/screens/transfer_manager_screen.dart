@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import '../../core/database/database_helper.dart';
 import '../../models/transfer_model.dart';
+import '../../services/transfer_service.dart';
 
 class TransferManagerScreen extends StatefulWidget {
   const TransferManagerScreen({super.key});
@@ -15,21 +16,28 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final DatabaseHelper _db = DatabaseHelper();
+  final TransferService _transferService = TransferService();
 
-  List<TransferModel> _allTransfers = [];
+  List<TransferModel> _history = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _loadHistory();
+    _transferService.addListener(_onTransferUpdate);
   }
 
   @override
   void dispose() {
+    _transferService.removeListener(_onTransferUpdate);
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _onTransferUpdate() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadHistory() async {
@@ -37,15 +45,10 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     final rows = await _db.getTransferHistory(limit: 200);
     if (!mounted) return;
     setState(() {
-      _allTransfers = rows.map((r) => TransferModel.fromMap(r)).toList();
+      _history = rows.map((r) => TransferModel.fromMap(r)).toList();
       _isLoading = false;
     });
   }
-
-  List<TransferModel> get _downloads =>
-      _allTransfers.where((t) => t.type == TransferType.download).toList();
-  List<TransferModel> get _uploads =>
-      _allTransfers.where((t) => t.type == TransferType.upload).toList();
 
   Future<void> _clearHistory() async {
     final confirmed = await showDialog<bool>(
@@ -75,22 +78,26 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
 
   @override
   Widget build(BuildContext context) {
+    final active = _transferService.activeTransfers;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Transfers'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            tooltip: 'Clear History',
-            onPressed: _allTransfers.isEmpty ? null : _clearHistory,
-          ),
+          if (_history.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep),
+              tooltip: 'Clear History',
+              onPressed: _clearHistory,
+            ),
         ],
         bottom: TabBar(
           controller: _tabController,
           tabs: [
-            Tab(text: 'All (${_allTransfers.length})'),
-            Tab(text: 'Downloads (${_downloads.length})'),
-            Tab(text: 'Uploads (${_uploads.length})'),
+            Tab(
+              text: active.isNotEmpty ? 'Active (${active.length})' : 'Active',
+            ),
+            Tab(text: 'History (${_history.length})'),
           ],
         ),
       ),
@@ -98,17 +105,108 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
           ? const Center(child: CircularProgressIndicator())
           : TabBarView(
               controller: _tabController,
-              children: [
-                _buildTransferList(_allTransfers),
-                _buildTransferList(_downloads),
-                _buildTransferList(_uploads),
-              ],
+              children: [_buildActiveTab(active), _buildHistoryTab()],
             ),
     );
   }
 
-  Widget _buildTransferList(List<TransferModel> transfers) {
-    if (transfers.isEmpty) {
+  // ================= ACTIVE TAB =================
+  Widget _buildActiveTab(List<ActiveTransfer> active) {
+    if (active.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_done, size: 64, color: Colors.grey[600]),
+            const SizedBox(height: 16),
+            Text(
+              'No active transfers',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Downloads and uploads will appear here',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: active.length,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemBuilder: (context, index) => _buildActiveTile(active[index]),
+    );
+  }
+
+  Widget _buildActiveTile(ActiveTransfer transfer) {
+    final isDownload = transfer.type == TransferType.download;
+    final pct = (transfer.progress * 100).round();
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: (isDownload ? Colors.blue : Colors.green).withAlpha(
+                      30,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isDownload ? Icons.download : Icons.upload,
+                    color: isDownload ? Colors.blue : Colors.green,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        transfer.fileName,
+                        style: Theme.of(context).textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${_formatBytes(transfer.bytesTransferred)} / ${_formatBytes(transfer.fileSize)} • ${_formatBytes(transfer.speed.round())}/s',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                // Cancel button
+                IconButton(
+                  icon: const Icon(Icons.cancel, color: Colors.red, size: 22),
+                  onPressed: () => _transferService.cancelTransfer(transfer.id),
+                  tooltip: 'Cancel',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: transfer.progress),
+            const SizedBox(height: 4),
+            Text('$pct%', style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ================= HISTORY TAB =================
+  Widget _buildHistoryTab() {
+    if (_history.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -132,14 +230,14 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     return RefreshIndicator(
       onRefresh: _loadHistory,
       child: ListView.builder(
-        itemCount: transfers.length,
+        itemCount: _history.length,
         padding: const EdgeInsets.symmetric(vertical: 4),
-        itemBuilder: (context, index) => _buildTransferTile(transfers[index]),
+        itemBuilder: (context, index) => _buildHistoryTile(_history[index]),
       ),
     );
   }
 
-  Widget _buildTransferTile(TransferModel transfer) {
+  Widget _buildHistoryTile(TransferModel transfer) {
     final isDownload = transfer.type == TransferType.download;
     final statusColor = _statusColor(transfer.status);
     final statusIcon = _statusIcon(transfer.status);
@@ -155,7 +253,6 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Direction icon
               Container(
                 width: 40,
                 height: 40,
@@ -172,7 +269,6 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              // File info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -192,7 +288,6 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
                 ),
               ),
               const SizedBox(width: 8),
-              // Status badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -222,6 +317,7 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     );
   }
 
+  // ================= HELPERS =================
   Color _statusColor(TransferStatus status) {
     switch (status) {
       case TransferStatus.completed:
