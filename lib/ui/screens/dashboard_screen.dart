@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/connection_provider.dart';
 import '../../models/connection_model.dart';
 import 'add_connection_screen.dart';
+import 'file_browser_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -170,6 +171,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
+        onTap: () => _handleConnect(context, connection),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primary,
           child: Icon(
@@ -295,9 +297,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _handleConnect(BuildContext context, ConnectionModel connection) {
-    // TODO: Navigate to file browser screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Connecting to ${connection.name}...')),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FileBrowserScreen(connection: connection),
+      ),
     );
   }
 
