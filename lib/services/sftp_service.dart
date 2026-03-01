@@ -239,14 +239,25 @@ class SFTPService {
       final sink = localFile.openWrite();
       int downloaded = 0;
       DateTime lastProgress = DateTime.now();
+      bool cancelled = false;
+
+      // Periodic cancel check — closes remote file to abort stream
+      final cancelTimer = isCancelled != null
+          ? Stream.periodic(const Duration(milliseconds: 500)).listen((_) {
+              if (!cancelled && isCancelled()) {
+                cancelled = true;
+                try {
+                  remoteFile.close();
+                } catch (_) {}
+              }
+            })
+          : null;
 
       try {
         await for (final chunk in remoteFile.read()) {
-          // Check cancel between chunks
-          if (isCancelled != null && isCancelled()) {
-            await sink.close();
-            if (await localFile.exists()) await localFile.delete();
-            throw Exception('Cancelled');
+          if (cancelled || (isCancelled != null && isCancelled())) {
+            cancelled = true;
+            break;
           }
 
           sink.add(chunk);
@@ -262,9 +273,18 @@ class SFTPService {
             }
           }
         }
+      } catch (e) {
+        // Stream error from force-closed file handle is expected on cancel
+        if (!cancelled) rethrow;
       } finally {
+        cancelTimer?.cancel();
         await sink.flush();
         await sink.close();
+      }
+
+      if (cancelled) {
+        if (await localFile.exists()) await localFile.delete();
+        throw Exception('Cancelled');
       }
 
       final writtenSize = await localFile.length();
