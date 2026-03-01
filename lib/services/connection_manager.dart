@@ -89,6 +89,21 @@ class ConnectionManager {
     }
   }
 
+  /// Create an empty file
+  Future<bool> createFile(String path, String name) async {
+    if (!isConnected || _activeConnection == null) {
+      throw Exception('Not connected');
+    }
+
+    switch (_activeConnection!.protocol) {
+      case ConnectionProtocol.ftp:
+      case ConnectionProtocol.ftps:
+        return await _ftpService!.createFile(path, name);
+      case ConnectionProtocol.sftp:
+        return await _sftpService!.createFile(path, name);
+    }
+  }
+
   /// Rename file/folder
   Future<bool> rename(String oldPath, String newPath) async {
     if (!isConnected || _activeConnection == null) {

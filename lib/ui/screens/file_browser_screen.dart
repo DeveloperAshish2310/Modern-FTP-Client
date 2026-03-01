@@ -73,6 +73,12 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   int _fileTotal = 0;
   int _transferredBytes = 0;
   int _totalBytes = 0;
+  DateTime? _transferStartTime;
+
+  // Search
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearching = false;
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -378,6 +384,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         _fileTotal = result.files.length;
         _transferredBytes = 0;
         _totalBytes = totalSize;
+        _transferStartTime = DateTime.now();
         _transferStatus = 'Uploading...';
       });
 
@@ -492,6 +499,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         _fileTotal = 1;
         _transferredBytes = 0;
         _totalBytes = file.size;
+        _transferStartTime = DateTime.now();
         _transferStatus = 'Downloading: ${file.name}';
       });
 
@@ -555,6 +563,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       _fileTotal = files.length;
       _transferredBytes = 0;
       _totalBytes = totalSize;
+      _transferStartTime = DateTime.now();
       _transferStatus = 'Downloading...';
     });
 
@@ -907,6 +916,16 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       actions: [
         if (!_isConnecting && _errorMessage == null) ...[
           IconButton(
+            icon: Icon(_isSearching ? Icons.search_off : Icons.search),
+            onPressed: () => setState(() {
+              _isSearching = !_isSearching;
+              if (!_isSearching) {
+                _searchQuery = '';
+                _searchController.clear();
+              }
+            }),
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => _loadDirectory(_currentPath),
           ),
@@ -917,6 +936,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                 child: ListTile(
                   leading: Icon(Icons.create_new_folder),
                   title: Text('New Folder'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'new_file',
+                child: ListTile(
+                  leading: Icon(Icons.note_add),
+                  title: Text('New File'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -966,6 +994,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
               switch (value) {
                 case 'new_folder':
                   _showCreateFolderDialog();
+                  break;
+                case 'new_file':
+                  _showCreateFileDialog();
                   break;
                 case 'select':
                   setState(() => _isSelectionMode = true);
@@ -1065,6 +1096,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       final progressValue = _totalBytes > 0
           ? _transferredBytes / _totalBytes
           : null;
+
+      // Calculate speed
+      String speedText = '';
+      if (_transferStartTime != null && _transferredBytes > 0) {
+        final elapsed = DateTime.now()
+            .difference(_transferStartTime!)
+            .inMilliseconds;
+        if (elapsed > 0) {
+          final bytesPerSec = (_transferredBytes / elapsed * 1000).round();
+          speedText = '${_formatBytes(bytesPerSec)}/s';
+        }
+      }
+
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -1083,6 +1127,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                     context,
                   ).textTheme.bodyLarge?.copyWith(color: Colors.grey),
                 ),
+                if (speedText.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    speedText,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 LinearProgressIndicator(value: progressValue),
                 const SizedBox(height: 8),
@@ -1175,9 +1228,45 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     }
 
     // File list
+    final filteredFiles = _searchQuery.isEmpty
+        ? _files
+        : _files
+              .where(
+                (f) =>
+                    f.name.toLowerCase().contains(_searchQuery.toLowerCase()),
+              )
+              .toList();
+
     return Column(
       children: [
         _buildBreadcrumbs(),
+        // Search bar
+        if (_isSearching)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: TextField(
+              controller: _searchController,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Search files...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => setState(() {
+                    _isSearching = false;
+                    _searchQuery = '';
+                    _searchController.clear();
+                  }),
+                ),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
         // Clipboard banner
         if (_clipboard != null)
           Container(
@@ -1210,7 +1299,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         const Divider(height: 1),
         if (_isLoading) const LinearProgressIndicator(),
         Expanded(
-          child: _files.isEmpty
+          child: filteredFiles.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1222,7 +1311,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Empty directory',
+                        _searchQuery.isNotEmpty
+                            ? 'No matches'
+                            : 'Empty directory',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ],
@@ -1231,9 +1322,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
               : RefreshIndicator(
                   onRefresh: () => _loadDirectory(_currentPath),
                   child: ListView.builder(
-                    itemCount: _files.length,
+                    itemCount: filteredFiles.length,
                     itemBuilder: (context, index) =>
-                        _buildFileItem(_files[index]),
+                        _buildFileItem(filteredFiles[index]),
                   ),
                 ),
         ),
@@ -1551,6 +1642,49 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             ),
           ),
           Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateFileDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New File'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'File name (e.g. notes.txt)',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.pop(context);
+                final result = await _connectionManager.createFile(
+                  _currentPath,
+                  name,
+                );
+                if (result && mounted) {
+                  _loadDirectory(_currentPath);
+                } else if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Failed to create file')),
+                  );
+                }
+              }
+            },
+            child: const Text('Create'),
+          ),
         ],
       ),
     );

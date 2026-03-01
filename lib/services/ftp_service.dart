@@ -105,6 +105,32 @@ class FTPService {
     }
   }
 
+  /// Create an empty file on the server
+  Future<bool> createFile(String path, String name) async {
+    if (!_isConnected || _ftpConnect == null) {
+      throw Exception('Not connected to FTP server');
+    }
+
+    try {
+      // Create a temporary empty file and upload it
+      final tempDir = await Directory.systemTemp.createTemp();
+      final tempFile = File('${tempDir.path}/$name');
+      await tempFile.create();
+
+      await _ftpConnect!.changeDirectory(path);
+      final result = await _ftpConnect!.uploadFile(tempFile);
+
+      // Clean up temp file
+      await tempFile.delete();
+      await tempDir.delete();
+
+      return result;
+    } catch (e) {
+      debugPrint('FTP Create File Error: $e');
+      return false;
+    }
+  }
+
   /// Rename file/folder
   Future<bool> rename(String oldPath, String newPath) async {
     if (!_isConnected || _ftpConnect == null) {

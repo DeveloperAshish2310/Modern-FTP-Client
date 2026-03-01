@@ -130,6 +130,29 @@ class SFTPService {
     }
   }
 
+  /// Create an empty file on the server
+  Future<bool> createFile(String path, String name) async {
+    if (!_isConnected || _sftpClient == null) {
+      throw Exception('Not connected to SFTP server');
+    }
+
+    try {
+      final fullPath = '$path/$name';
+      final file = await _sftpClient!.open(
+        fullPath,
+        mode:
+            SftpFileOpenMode.write |
+            SftpFileOpenMode.create |
+            SftpFileOpenMode.truncate,
+      );
+      await file.close();
+      return true;
+    } catch (e) {
+      debugPrint('SFTP Create File Error: $e');
+      return false;
+    }
+  }
+
   /// Rename file/folder
   Future<bool> rename(String oldPath, String newPath) async {
     if (!_isConnected || _sftpClient == null) {
