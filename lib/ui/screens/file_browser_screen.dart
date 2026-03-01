@@ -342,6 +342,22 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     });
   }
 
+  /// Get the download directory - uses app's external storage which is always writable
+  Future<Directory> _getDownloadDir() async {
+    // Use app external dir as it's always writable without scoped storage issues
+    final extDir = await getExternalStorageDirectory();
+    if (extDir != null) {
+      final dlDir = Directory('${extDir.path}/Downloads');
+      if (!await dlDir.exists()) await dlDir.create(recursive: true);
+      return dlDir;
+    }
+    // Fallback
+    final tmpDir = await getTemporaryDirectory();
+    final dlDir = Directory('${tmpDir.path}/Downloads');
+    if (!await dlDir.exists()) await dlDir.create(recursive: true);
+    return dlDir;
+  }
+
   /// Trigger Android MediaScanner so the file shows up in the file manager
   Future<void> _scanFile(String path) async {
     try {
@@ -464,12 +480,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     if (!await _ensureStoragePermission()) return;
 
     try {
-      final downloadDir = Directory('/storage/emulated/0/Download/FTPClient');
-      if (!await downloadDir.exists()) {
-        await downloadDir.create(recursive: true);
-      }
-
+      final downloadDir = await _getDownloadDir();
       final localPath = '${downloadDir.path}/${file.name}';
+      debugPrint('Download target: $localPath');
 
       // Check if local file already exists
       final localFile = File(localPath);
@@ -499,7 +512,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       setState(() => _isTransferring = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Saved to: Download/FTPClient/${file.name}'),
+          content: Text('Downloaded: ${file.name}'),
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
             label: 'OPEN',
@@ -544,10 +557,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     int downloaded = 0;
     int failed = 0;
 
-    final downloadDir = Directory('/storage/emulated/0/Download/FTPClient');
-    if (!await downloadDir.exists()) {
-      await downloadDir.create(recursive: true);
-    }
+    final downloadDir = await _getDownloadDir();
 
     for (final file in files) {
       if (_cancelRequested) break;
@@ -559,11 +569,11 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
       try {
         final localPath = '${downloadDir.path}/${file.name}';
+        debugPrint('Batch download target: $localPath');
         await _connectionManager.downloadFile(
           remotePath: file.path,
           localPath: localPath,
         );
-        await _scanFile(localPath);
         downloaded++;
         setState(() => _transferDone = downloaded + failed);
       } catch (e) {
@@ -576,17 +586,17 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     setState(() => _isTransferring = false);
     _exitSelectionMode();
 
+    final dirPath = downloadDir.path;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Downloaded $downloaded to Download/FTPClient/${failed > 0 ? ' ($failed failed)' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
+          'Downloaded $downloaded file(s)${failed > 0 ? ', $failed failed' : ''}${_cancelRequested ? ' (cancelled)' : ''}',
         ),
         duration: const Duration(seconds: 5),
         action: downloaded > 0
             ? SnackBarAction(
                 label: 'OPEN FOLDER',
-                onPressed: () =>
-                    OpenFilex.open('/storage/emulated/0/Download/FTPClient'),
+                onPressed: () => OpenFilex.open(dirPath),
               )
             : null,
       ),
