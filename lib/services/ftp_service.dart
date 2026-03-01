@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:ftpconnect/ftpconnect.dart';
 import '../models/connection_model.dart';
 import '../models/file_item_model.dart';
@@ -35,7 +36,7 @@ class FTPService {
 
       return isConnected;
     } catch (e) {
-      print('FTP Connection Error: $e');
+      debugPrint('FTP Connection Error: $e');
       _isConnected = false;
       return false;
     }
@@ -48,7 +49,7 @@ class FTPService {
         await _ftpConnect!.disconnect();
       }
     } catch (e) {
-      print('FTP Disconnect Error: $e');
+      debugPrint('FTP Disconnect Error: $e');
     } finally {
       _isConnected = false;
       _ftpConnect = null;
@@ -76,14 +77,14 @@ class FTPService {
             size: item.size ?? 0,
             isDirectory: item.type == FTPEntryType.DIR,
             modifiedDate: item.modifyTime,
-            permissions: item.permissions,
+            permissions: null, // permissions not available in FTPEntry
           ),
         );
       }
 
       return items;
     } catch (e) {
-      print('FTP List Directory Error: $e');
+      debugPrint('FTP List Directory Error: $e');
       throw Exception('Failed to list directory: $e');
     }
   }
@@ -99,7 +100,7 @@ class FTPService {
       final result = await _ftpConnect!.makeDirectory(fullPath);
       return result;
     } catch (e) {
-      print('FTP Create Directory Error: $e');
+      debugPrint('FTP Create Directory Error: $e');
       return false;
     }
   }
@@ -114,7 +115,7 @@ class FTPService {
       final result = await _ftpConnect!.rename(oldPath, newPath);
       return result;
     } catch (e) {
-      print('FTP Rename Error: $e');
+      debugPrint('FTP Rename Error: $e');
       return false;
     }
   }
@@ -129,7 +130,7 @@ class FTPService {
       final result = await _ftpConnect!.deleteFile(path);
       return result;
     } catch (e) {
-      print('FTP Delete File Error: $e');
+      debugPrint('FTP Delete File Error: $e');
       return false;
     }
   }
@@ -144,7 +145,7 @@ class FTPService {
       final result = await _ftpConnect!.deleteDirectory(path);
       return result;
     } catch (e) {
-      print('FTP Delete Directory Error: $e');
+      debugPrint('FTP Delete Directory Error: $e');
       return false;
     }
   }
@@ -163,15 +164,11 @@ class FTPService {
       final localFile = File(localPath);
 
       // Download with progress callback
-      final result = await _ftpConnect!.downloadFile(
-        remotePath,
-        localFile,
-        onProgress: onProgress,
-      );
+      final result = await _ftpConnect!.downloadFile(remotePath, localFile);
 
       return result;
     } catch (e) {
-      print('FTP Download Error: $e');
+      debugPrint('FTP Download Error: $e');
       throw Exception('Download failed: $e');
     }
   }
@@ -194,15 +191,11 @@ class FTPService {
       }
 
       // Upload with progress callback
-      final result = await _ftpConnect!.uploadFile(
-        localFile,
-        pRemoteName: remotePath,
-        onProgress: onProgress,
-      );
+      final result = await _ftpConnect!.uploadFile(localFile);
 
       return result;
     } catch (e) {
-      print('FTP Upload Error: $e');
+      debugPrint('FTP Upload Error: $e');
       throw Exception('Upload failed: $e');
     }
   }
@@ -216,7 +209,7 @@ class FTPService {
     try {
       return await _ftpConnect!.sizeFile(remotePath);
     } catch (e) {
-      print('FTP Get File Size Error: $e');
+      debugPrint('FTP Get File Size Error: $e');
       return null;
     }
   }

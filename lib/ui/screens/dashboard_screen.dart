@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/connection_provider.dart';
-import '../../providers/theme_provider.dart';
 import '../../models/connection_model.dart';
 import 'add_connection_screen.dart';
 

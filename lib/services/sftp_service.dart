@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
 import '../models/connection_model.dart';
 import '../models/file_item_model.dart';
@@ -52,7 +53,7 @@ class SFTPService {
 
       return true;
     } catch (e) {
-      print('SFTP Connection Error: $e');
+      debugPrint('SFTP Connection Error: $e');
       _isConnected = false;
       return false;
     }
@@ -64,7 +65,7 @@ class SFTPService {
       _sftpClient?.close();
       _sshClient?.close();
     } catch (e) {
-      print('SFTP Disconnect Error: $e');
+      debugPrint('SFTP Disconnect Error: $e');
     } finally {
       _isConnected = false;
       _sftpClient = null;
@@ -101,14 +102,14 @@ class SFTPService {
                     item.attr.modifyTime! * 1000,
                   )
                 : null,
-            permissions: _formatPermissions(item.attr.permissions),
+            permissions: null, // permissions not available in SftpFileAttrs
           ),
         );
       }
 
       return fileItems;
     } catch (e) {
-      print('SFTP List Directory Error: $e');
+      debugPrint('SFTP List Directory Error: $e');
       throw Exception('Failed to list directory: $e');
     }
   }
@@ -124,7 +125,7 @@ class SFTPService {
       await _sftpClient!.mkdir(fullPath);
       return true;
     } catch (e) {
-      print('SFTP Create Directory Error: $e');
+      debugPrint('SFTP Create Directory Error: $e');
       return false;
     }
   }
@@ -139,7 +140,7 @@ class SFTPService {
       await _sftpClient!.rename(oldPath, newPath);
       return true;
     } catch (e) {
-      print('SFTP Rename Error: $e');
+      debugPrint('SFTP Rename Error: $e');
       return false;
     }
   }
@@ -154,7 +155,7 @@ class SFTPService {
       await _sftpClient!.remove(path);
       return true;
     } catch (e) {
-      print('SFTP Delete File Error: $e');
+      debugPrint('SFTP Delete File Error: $e');
       return false;
     }
   }
@@ -169,7 +170,7 @@ class SFTPService {
       await _sftpClient!.rmdir(path);
       return true;
     } catch (e) {
-      print('SFTP Delete Directory Error: $e');
+      debugPrint('SFTP Delete Directory Error: $e');
       return false;
     }
   }
@@ -207,7 +208,7 @@ class SFTPService {
       await sink.close();
       return true;
     } catch (e) {
-      print('SFTP Download Error: $e');
+      debugPrint('SFTP Download Error: $e');
       throw Exception('Download failed: $e');
     }
   }
@@ -242,7 +243,7 @@ class SFTPService {
       final stream = localFile.openRead();
 
       await for (final chunk in stream) {
-        await remoteFile.write(chunk as List<int>);
+        await remoteFile.write(Stream.value(Uint8List.fromList(chunk)));
         uploaded += chunk.length;
 
         if (onProgress != null && fileSize > 0) {
@@ -252,7 +253,7 @@ class SFTPService {
 
       return true;
     } catch (e) {
-      print('SFTP Upload Error: $e');
+      debugPrint('SFTP Upload Error: $e');
       throw Exception('Upload failed: $e');
     }
   }
@@ -267,7 +268,7 @@ class SFTPService {
       final stat = await _sftpClient!.stat(remotePath);
       return stat.size;
     } catch (e) {
-      print('SFTP Get File Size Error: $e');
+      debugPrint('SFTP Get File Size Error: $e');
       return null;
     }
   }
@@ -284,19 +285,5 @@ class SFTPService {
     } catch (e) {
       return false;
     }
-  }
-
-  /// Format permissions to string
-  String? _formatPermissions(int? permissions) {
-    if (permissions == null) return null;
-
-    String result = '';
-    const types = ['---', '--x', '-w-', '-wx', 'r--', 'r-x', 'rw-', 'rwx'];
-
-    result += types[(permissions >> 6) & 7]; // Owner
-    result += types[(permissions >> 3) & 7]; // Group
-    result += types[permissions & 7]; // Others
-
-    return result;
   }
 }
