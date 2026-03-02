@@ -458,11 +458,14 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
         try {
           final remotePath = '$_currentPath/${file.name}';
+          debugPrint('[UPLOAD] Starting: ${file.name} -> $remotePath');
 
-          // Check if file exists on server
+          // Quick exists check with timeout — don't block upload
           bool fileExists = false;
           try {
-            fileExists = await _connectionManager.exists(remotePath);
+            fileExists = await _connectionManager
+                .exists(remotePath)
+                .timeout(const Duration(seconds: 2), onTimeout: () => false);
           } catch (_) {
             // If exists check fails, just try uploading
           }
@@ -483,17 +486,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             }
           }
 
+          debugPrint('[UPLOAD] Calling uploadFile...');
           await _connectionManager.uploadFile(
             localPath: file.path!,
             remotePath: remotePath,
           );
+          debugPrint('[UPLOAD] Done: ${file.name}');
           uploaded++;
           _transferredBytes += File(file.path!).lengthSync();
           setState(() => _fileDone = uploaded + skipped + failed);
         } catch (e) {
           failed++;
           lastError = e.toString().replaceAll('Exception: ', '');
-          debugPrint('Upload failed for ${file.name}: $e');
+          debugPrint('[UPLOAD] FAILED for ${file.name}: $e');
         }
       }
 
