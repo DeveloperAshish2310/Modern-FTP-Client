@@ -6,6 +6,7 @@ import 'providers/theme_provider.dart';
 import 'providers/connection_provider.dart';
 import 'core/utils/permission_helper.dart';
 import 'ui/screens/dashboard_screen.dart';
+import 'ui/screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,6 +49,7 @@ class _AppGate extends StatefulWidget {
 }
 
 class _AppGateState extends State<_AppGate> {
+  bool _showSplash = true;
   bool _isAuthenticated = false;
   bool _isChecking = true;
   bool _authFailed = false;
@@ -55,7 +57,12 @@ class _AppGateState extends State<_AppGate> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkLock());
+  }
+
+  void _onSplashComplete() {
+    if (!mounted) return;
+    setState(() => _showSplash = false);
+    _checkLock();
   }
 
   Future<void> _checkLock() async {
@@ -121,6 +128,10 @@ class _AppGateState extends State<_AppGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showSplash) {
+      return SplashScreen(onComplete: _onSplashComplete);
+    }
+
     if (_isAuthenticated) {
       return const DashboardScreen();
     }

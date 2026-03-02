@@ -403,26 +403,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Text('FTP Client'),
           ],
         ),
-        content: const Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Version 1.0.0'),
-            SizedBox(height: 12),
             Text(
+              'Version 1.0.0',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
               'A modern FTP/SFTP client for Android with advanced file '
               'management, background transfers, built-in text editor, '
               'and real-time notifications.',
             ),
-            SizedBox(height: 16),
-            Text('Features:', style: TextStyle(fontWeight: FontWeight.bold)),
-            SizedBox(height: 4),
-            Text('• FTP, SFTP & FTPS support'),
-            Text('• Background downloads & uploads'),
-            Text('• Built-in text file editor'),
-            Text('• Transfer notifications'),
-            Text('• Dark & Light themes'),
-            Text('• Accent color customization'),
+            const SizedBox(height: 16),
+            const Text(
+              'Features:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            const Text('• FTP, SFTP & FTPS support'),
+            const Text('• Background downloads & uploads'),
+            const Text('• Built-in text file editor'),
+            const Text('• Transfer notifications'),
+            const Text('• Dark & Light themes'),
+            const Text('• Accent color customization'),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            const Text(
+              'Developer',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            const Row(
+              children: [
+                Icon(Icons.person, size: 16),
+                SizedBox(width: 8),
+                Text('Ashish'),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Row(
+              children: [
+                Icon(Icons.email, size: 16),
+                SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'DeveloperAshish2310@gmail.com',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '© 2026 Ashish. All rights reserved.',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
+              ),
+            ),
           ],
         ),
         actions: [
