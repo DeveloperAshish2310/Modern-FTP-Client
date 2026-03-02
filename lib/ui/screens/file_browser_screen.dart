@@ -1470,7 +1470,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       },
       onLongPress: () {
         if (!_isSelectionMode) {
-          _enterSelectionMode(file);
+          _showFileActions(file);
         }
       },
       child: Container(
@@ -1646,6 +1646,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _showDeleteDialog(file);
+                },
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.checklist),
+                title: const Text('Select'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _enterSelectionMode(file);
                 },
               ),
             ],
