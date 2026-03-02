@@ -302,7 +302,7 @@ class SFTPService {
     }
   }
 
-  /// Upload file using pipelined SftpFileWriter for maximum speed
+  /// Upload file using sequential writeBytes for reliability
   Future<bool> uploadFile({
     required String localPath,
     required String remotePath,
@@ -320,6 +320,8 @@ class SFTPService {
       }
 
       final fileSize = await localFile.length();
+      print('[SFTP] Upload: $remotePath ($fileSize bytes)');
+
       final remoteFile = await _sftpClient!.open(
         remotePath,
         mode:
@@ -328,29 +330,40 @@ class SFTPService {
             SftpFileOpenMode.truncate,
       );
 
-      // Use SftpFileWriter for pipelined writes (much faster than per-chunk await)
-      final stream = localFile.openRead().map(
-        (chunk) => Uint8List.fromList(chunk),
-      );
+      // Read in 64KB chunks and write sequentially
+      const chunkSize = 64 * 1024;
+      int uploaded = 0;
       DateTime lastProgress = DateTime.now();
+      final raf = await localFile.open();
 
-      final writer = remoteFile.write(
-        stream,
-        onProgress: (totalWritten) {
-          if (onProgress != null && fileSize > 0) {
+      try {
+        while (uploaded < fileSize) {
+          final remaining = fileSize - uploaded;
+          final toRead = remaining < chunkSize ? remaining : chunkSize;
+          final chunk = await raf.read(toRead);
+          if (chunk.isEmpty) break;
+
+          await remoteFile.writeBytes(
+            Uint8List.fromList(chunk),
+            offset: uploaded,
+          );
+          uploaded += chunk.length;
+
+          if (onProgress != null) {
             final now = DateTime.now();
             if (now.difference(lastProgress).inMilliseconds >= 200 ||
-                totalWritten >= fileSize) {
+                uploaded >= fileSize) {
               lastProgress = now;
-              onProgress(totalWritten, fileSize);
+              onProgress(uploaded, fileSize);
             }
           }
-        },
-      );
+        }
+      } finally {
+        await raf.close();
+        await remoteFile.close();
+      }
 
-      await writer.done;
-      await remoteFile.close();
-
+      print('[SFTP] ===== UPLOAD COMPLETE =====');
       return true;
     } catch (e) {
       debugPrint('SFTP Upload Error: $e');
