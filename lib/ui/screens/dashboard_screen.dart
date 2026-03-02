@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/connection_provider.dart';
 import '../../models/connection_model.dart';
+import '../../core/utils/page_transitions.dart';
+import '../widgets/shimmer_loading.dart';
 import 'add_connection_screen.dart';
 import 'file_browser_screen.dart';
 import 'transfer_manager_screen.dart';
@@ -28,14 +30,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             tooltip: 'Transfers',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const TransferManagerScreen()),
+              SlidePageRoute(page: const TransferManagerScreen()),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              FadeScalePageRoute(page: const SettingsScreen()),
             ),
           ),
         ],
@@ -43,7 +45,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: Consumer<ConnectionProvider>(
         builder: (context, connectionProvider, _) {
           if (connectionProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return ListView(
+              children: List.generate(5, (_) => const ConnectionCardSkeleton()),
+            );
           }
 
           final favorites = connectionProvider.favorites;
@@ -148,7 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const AddConnectionScreen()),
+            SlidePageRoute(page: const AddConnectionScreen()),
           );
         },
         child: const Icon(Icons.add),
@@ -307,18 +311,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _handleConnect(BuildContext context, ConnectionModel connection) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => FileBrowserScreen(connection: connection),
-      ),
+      SlidePageRoute(page: FileBrowserScreen(connection: connection)),
     );
   }
 
   void _handleEdit(BuildContext context, ConnectionModel connection) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => AddConnectionScreen(connection: connection),
-      ),
+      SlidePageRoute(page: AddConnectionScreen(connection: connection)),
     );
   }
 
