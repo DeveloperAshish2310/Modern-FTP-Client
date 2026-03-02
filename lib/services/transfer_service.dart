@@ -260,6 +260,7 @@ class TransferService extends ChangeNotifier {
       // Success
       active.status = TransferStatus.completed;
       active.bytesTransferred = active.fileSize;
+      notifyListeners(); // Tell UI we're done NOW
       await _db.updateTransfer(active.id, {
         'status': TransferStatus.completed.name,
         'completed_at': DateTime.now().millisecondsSinceEpoch,
