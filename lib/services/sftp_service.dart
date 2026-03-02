@@ -239,6 +239,8 @@ class SFTPService {
       final sink = localFile.openWrite();
       DateTime lastProgress = DateTime.now();
       bool cancelled = false;
+      int bytesWritten = 0;
+      int lastFlushAt = 0;
 
       try {
         await for (final chunk in remoteFile.read(
@@ -258,6 +260,13 @@ class SFTPService {
             break;
           }
           sink.add(chunk);
+          bytesWritten += chunk.length;
+
+          // Flush to disk every ~1MB to prevent large end-of-transfer stall
+          if (bytesWritten - lastFlushAt >= 1024 * 1024) {
+            await sink.flush();
+            lastFlushAt = bytesWritten;
+          }
         }
       } catch (e) {
         if (!cancelled) rethrow;
@@ -267,6 +276,11 @@ class SFTPService {
         try {
           await remoteFile.close();
         } catch (_) {}
+      }
+
+      // Fire 100% progress
+      if (!cancelled && onProgress != null) {
+        onProgress(fileSize, fileSize);
       }
 
       if (cancelled) {
