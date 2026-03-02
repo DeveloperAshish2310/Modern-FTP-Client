@@ -3,45 +3,33 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../services/connection_manager.dart';
 
-/// Text file extensions that can be opened in the editor
-const textExtensions = {
-  // Code
-  'dart', 'py', 'js', 'ts', 'jsx', 'tsx', 'java', 'kt', 'c', 'cpp', 'h',
-  'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'lua', 'pl', 'sh', 'bash',
-  'zsh', 'bat', 'ps1', 'r', 'scala', 'ex', 'exs', 'hs', 'sql',
-  // Web
-  'html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte',
-  // Config
-  'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties',
-  'xml', 'plist', 'gradle',
-  // Text / Docs
-  'txt', 'md', 'rst', 'csv', 'tsv', 'log', 'gitignore', 'dockerignore',
-  'editorconfig', 'htaccess',
-  // Build / CI
-  'dockerfile', 'makefile', 'cmake', 'gemfile', 'rakefile',
+/// Binary file extensions that should NOT be opened in the editor
+const _binaryExtensions = {
+  // Images
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'ico', 'svg', 'tiff', 'tif',
+  'heic', 'heif', 'raw', 'cr2', 'nef', 'psd', 'ai',
+  // Videos
+  'mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', '3gp', 'ts',
+  'mpg', 'mpeg', 'vob',
+  // Audio
+  'mp3', 'wav', 'flac', 'aac', 'ogg', 'wma', 'm4a', 'opus', 'aiff',
+  // Archives
+  'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst', 'cab', 'iso', 'dmg',
+  // Executables / Binary
+  'exe', 'dll', 'so', 'dylib', 'apk', 'aab', 'deb', 'rpm', 'msi', 'app',
+  'bin', 'dat', 'class', 'pyc', 'o', 'obj',
+  // Documents (binary)
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+  // Fonts
+  'ttf', 'otf', 'woff', 'woff2', 'eot',
+  // Database
+  'db', 'sqlite', 'sqlite3', 'mdb',
 };
 
-/// Returns true if the file extension is a known text file
+/// Returns true if the file can be opened in the text editor
 bool isTextFile(String fileName) {
   final ext = fileName.split('.').last.toLowerCase();
-  final baseName = fileName.toLowerCase();
-  // Check extension OR well-known filenames
-  return textExtensions.contains(ext) ||
-      {
-        'makefile',
-        'dockerfile',
-        'gemfile',
-        'rakefile',
-        'procfile',
-        'license',
-        'readme',
-        'changelog',
-        '.gitignore',
-        '.dockerignore',
-        '.env',
-        '.editorconfig',
-        '.htaccess',
-      }.contains(baseName);
+  return !_binaryExtensions.contains(ext);
 }
 
 class TextEditorScreen extends StatefulWidget {

@@ -1546,8 +1546,10 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1578,84 +1580,93 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                 ),
               ),
               const Divider(height: 1),
-              if (file.isDirectory)
-                ListTile(
-                  leading: const Icon(Icons.folder_open),
-                  title: const Text('Open'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _navigateTo(file.path);
-                  },
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (file.isDirectory)
+                        ListTile(
+                          leading: const Icon(Icons.folder_open),
+                          title: const Text('Open'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _navigateTo(file.path);
+                          },
+                        ),
+                      if (!file.isDirectory)
+                        ListTile(
+                          leading: const Icon(Icons.download),
+                          title: const Text('Download'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _downloadFile(file);
+                          },
+                        ),
+                      if (!file.isDirectory && isTextFile(file.name))
+                        ListTile(
+                          leading: const Icon(Icons.edit_note),
+                          title: const Text('Edit in Editor'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openInEditor(file);
+                          },
+                        ),
+                      ListTile(
+                        leading: const Icon(Icons.copy),
+                        title: const Text('Copy'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _copySingle(file);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.content_cut),
+                        title: const Text('Move'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _moveSingle(file);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.edit),
+                        title: const Text('Rename'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showRenameDialog(file);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.info_outline),
+                        title: const Text('Details'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showFileInfoDialog(file);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.delete, color: Colors.red),
+                        title: const Text(
+                          'Delete',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _showDeleteDialog(file);
+                        },
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.checklist),
+                        title: const Text('Select'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _enterSelectionMode(file);
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              if (!file.isDirectory)
-                ListTile(
-                  leading: const Icon(Icons.download),
-                  title: const Text('Download'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _downloadFile(file);
-                  },
-                ),
-              if (!file.isDirectory && isTextFile(file.name))
-                ListTile(
-                  leading: const Icon(Icons.edit_note),
-                  title: const Text('Edit in Editor'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _openInEditor(file);
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.copy),
-                title: const Text('Copy'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _copySingle(file);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.content_cut),
-                title: const Text('Move'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _moveSingle(file);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit),
-                title: const Text('Rename'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showRenameDialog(file);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Details'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showFileInfoDialog(file);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
-                  'Delete',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showDeleteDialog(file);
-                },
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.checklist),
-                title: const Text('Select'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _enterSelectionMode(file);
-                },
               ),
             ],
           ),
