@@ -113,7 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         final authed = await _localAuth.authenticate(
                           localizedReason: 'Authenticate to enable App Lock',
                           options: const AuthenticationOptions(
-                            biometricOnly: true,
+                            biometricOnly: false,
                           ),
                         );
                         if (!authed) return;
