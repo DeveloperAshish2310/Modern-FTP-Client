@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/connection_model.dart';
@@ -178,8 +179,26 @@ class TransferService extends ChangeNotifier {
   void cancelTransfer(int dbId) {
     final idx = _activeTransfers.indexWhere((t) => t.id == dbId);
     if (idx >= 0) {
-      _activeTransfers[idx].status = TransferStatus.cancelled;
+      final transfer = _activeTransfers[idx];
+      transfer.status = TransferStatus.cancelled;
+
+      // Update DB
+      _db.updateTransfer(dbId, {'status': TransferStatus.cancelled.name});
+
+      // Remove from active list immediately
+      _activeTransfers.removeAt(idx);
       notifyListeners();
+
+      // Show cancelled notification
+      _showCompleteNotification(transfer, success: false);
+
+      // Clean up partial file for downloads
+      if (transfer.type == TransferType.download) {
+        try {
+          final file = File(transfer.localPath);
+          if (file.existsSync()) file.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 
