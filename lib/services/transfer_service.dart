@@ -307,11 +307,14 @@ class TransferService extends ChangeNotifier {
   void _showProgressNotification(ActiveTransfer transfer) {
     final pct = (transfer.progress * 100).round();
     final isDownload = transfer.type == TransferType.download;
+    final speedText = transfer.speed > 0
+        ? ' • ${_formatBytes(transfer.speed.round())}/s'
+        : '';
 
     _notifications.show(
       transfer.id,
       '${isDownload ? '⬇️' : '⬆️'} ${transfer.fileName}',
-      '$pct% • ${_formatBytes(transfer.bytesTransferred)} / ${_formatBytes(transfer.fileSize)}',
+      '$pct% • ${_formatBytes(transfer.bytesTransferred)} / ${_formatBytes(transfer.fileSize)}$speedText',
       NotificationDetails(
         android: AndroidNotificationDetails(
           'ftp_transfers',

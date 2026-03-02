@@ -14,7 +14,6 @@ import '../../services/connection_manager.dart';
 import '../../services/transfer_service.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/utils/page_transitions.dart';
-import '../widgets/shimmer_loading.dart';
 import 'transfer_manager_screen.dart';
 import 'text_editor_screen.dart';
 
@@ -1219,35 +1218,34 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     // Connecting state
     if (_isConnecting && _errorMessage == null) {
-      return Stack(
-        children: [
-          const FileListSkeleton(itemCount: 10),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withAlpha(230),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Connecting to ${widget.connection.host}...',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${widget.connection.protocol.displayName} • Port ${widget.connection.port}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Connecting to ${widget.connection.host}...',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${widget.connection.protocol.displayName} • Port ${widget.connection.port}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
       );
     }
 
