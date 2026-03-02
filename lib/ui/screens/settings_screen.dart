@@ -19,6 +19,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _defaultFtpPort = AppConstants.ftpPort;
   int _defaultSftpPort = AppConstants.sftpPort;
   int _connectionTimeout = AppConstants.connectionTimeout;
+  bool _animationsEnabled = true;
+  int _animationSpeed = 1; // 0=slow, 1=normal, 2=fast
 
   @override
   void initState() {
@@ -42,6 +44,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           prefs.getInt('default_sftp_port') ?? AppConstants.sftpPort;
       _connectionTimeout =
           prefs.getInt('connection_timeout') ?? AppConstants.connectionTimeout;
+      _animationsEnabled = prefs.getBool('animations_enabled') ?? true;
+      _animationSpeed = prefs.getInt('animation_speed') ?? 1;
     });
   }
 
@@ -150,6 +154,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Connection Timeout'),
             subtitle: Text('$_connectionTimeout seconds'),
             onTap: () => _showTimeoutDialog(),
+          ),
+
+          // ============ SSH KEYS ============
+          _sectionHeader('SSH Keys'),
+          ListTile(
+            leading: const Icon(Icons.vpn_key),
+            title: const Text('SSH Key Authentication'),
+            subtitle: const Text(
+              'SSH keys are configured per connection in the connection editor',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.pop(context); // Back to dashboard with connections
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Edit a connection to configure SSH key authentication',
+                  ),
+                ),
+              );
+            },
+          ),
+
+          // ============ ANIMATIONS ============
+          _sectionHeader('Animations'),
+          SwitchListTile(
+            secondary: const Icon(Icons.animation),
+            title: const Text('Enable Animations'),
+            subtitle: const Text('Toggle UI animations'),
+            value: _animationsEnabled,
+            onChanged: (val) {
+              setState(() => _animationsEnabled = val);
+              _savePref('animations_enabled', val);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.speed),
+            title: const Text('Animation Speed'),
+            subtitle: Text(
+              _animationSpeed == 0
+                  ? 'Slow'
+                  : _animationSpeed == 1
+                  ? 'Normal'
+                  : 'Fast',
+            ),
+            trailing: SizedBox(
+              width: 160,
+              child: Slider(
+                value: _animationSpeed.toDouble(),
+                min: 0,
+                max: 2,
+                divisions: 2,
+                label: _animationSpeed == 0
+                    ? 'Slow'
+                    : _animationSpeed == 1
+                    ? 'Normal'
+                    : 'Fast',
+                onChanged: _animationsEnabled
+                    ? (val) {
+                        setState(() => _animationSpeed = val.round());
+                        _savePref('animation_speed', val.round());
+                      }
+                    : null,
+              ),
+            ),
           ),
 
           // ============ ABOUT ============
