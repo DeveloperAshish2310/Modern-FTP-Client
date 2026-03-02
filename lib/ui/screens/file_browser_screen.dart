@@ -14,6 +14,7 @@ import '../../services/connection_manager.dart';
 import '../../services/transfer_service.dart';
 import '../../core/database/database_helper.dart';
 import 'transfer_manager_screen.dart';
+import 'text_editor_screen.dart';
 
 /// Clipboard action for copy/move operations
 enum _ClipboardAction { copy, move }
@@ -542,6 +543,20 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         ),
       );
     }
+  }
+
+  // --- Open in Text Editor ---
+  void _openInEditor(FileItemModel file) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TextEditorScreen(
+          remotePath: file.path,
+          fileName: file.name,
+          connectionManager: _connectionManager,
+        ),
+      ),
+    );
   }
 
   // --- Download ---
@@ -1447,6 +1462,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           _toggleSelection(file);
         } else if (file.isDirectory) {
           _navigateTo(file.path);
+        } else if (isTextFile(file.name)) {
+          _openInEditor(file);
         } else {
           _showFileInfoDialog(file);
         }
@@ -1577,6 +1594,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     _downloadFile(file);
+                  },
+                ),
+              if (!file.isDirectory && isTextFile(file.name))
+                ListTile(
+                  leading: const Icon(Icons.edit_note),
+                  title: const Text('Edit in Editor'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openInEditor(file);
                   },
                 ),
               ListTile(
