@@ -338,8 +338,8 @@ class SFTPService {
       final raf = await localFile.open();
 
       try {
-        // Use small 16KB chunks to match SFTP packet size
-        const chunkSize = 16 * 1024;
+        // Use 256KB chunks — writeBytes internally pipelines 16 x 16KB writes
+        const chunkSize = 256 * 1024;
         while (uploaded < fileSize) {
           final remaining = fileSize - uploaded;
           final toRead = remaining < chunkSize ? remaining : chunkSize;
