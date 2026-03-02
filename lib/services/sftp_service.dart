@@ -235,51 +235,38 @@ class SFTPService {
         mode: SftpFileOpenMode.read,
       );
 
-      // Stream chunks directly to disk
+      // Use streaming read() which pipelines 64 x 16KB chunks (1MB in flight)
       final sink = localFile.openWrite();
-      int downloaded = 0;
       DateTime lastProgress = DateTime.now();
       bool cancelled = false;
 
-      // Periodic cancel check — closes remote file to abort stream
-      final cancelTimer = isCancelled != null
-          ? Stream.periodic(const Duration(milliseconds: 500)).listen((_) {
-              if (!cancelled && isCancelled()) {
-                cancelled = true;
-                try {
-                  remoteFile.close();
-                } catch (_) {}
-              }
-            })
-          : null;
-
       try {
-        await for (final chunk in remoteFile.read()) {
-          if (cancelled || (isCancelled != null && isCancelled())) {
+        await for (final chunk in remoteFile.read(
+          onProgress: (bytesRead) {
+            if (onProgress != null) {
+              final now = DateTime.now();
+              if (now.difference(lastProgress).inMilliseconds >= 200 ||
+                  bytesRead >= fileSize) {
+                lastProgress = now;
+                onProgress(bytesRead, fileSize);
+              }
+            }
+          },
+        )) {
+          if (isCancelled != null && isCancelled()) {
             cancelled = true;
             break;
           }
-
           sink.add(chunk);
-          downloaded += chunk.length;
-
-          // Throttle progress updates to max once per 100ms
-          if (onProgress != null && fileSize > 0) {
-            final now = DateTime.now();
-            if (now.difference(lastProgress).inMilliseconds >= 100 ||
-                downloaded >= fileSize) {
-              lastProgress = now;
-              onProgress(downloaded, fileSize);
-            }
-          }
         }
       } catch (e) {
-        // Stream error from force-closed file handle is expected on cancel
         if (!cancelled) rethrow;
       } finally {
-        cancelTimer?.cancel();
         await sink.flush();
         await sink.close();
+        try {
+          await remoteFile.close();
+        } catch (_) {}
       }
 
       if (cancelled) {
@@ -301,7 +288,7 @@ class SFTPService {
     }
   }
 
-  /// Upload file
+  /// Upload file using pipelined SftpFileWriter for maximum speed
   Future<bool> uploadFile({
     required String localPath,
     required String remotePath,
@@ -327,17 +314,28 @@ class SFTPService {
             SftpFileOpenMode.truncate,
       );
 
-      int uploaded = 0;
-      final stream = localFile.openRead();
+      // Use SftpFileWriter for pipelined writes (much faster than per-chunk await)
+      final stream = localFile.openRead().map(
+        (chunk) => Uint8List.fromList(chunk),
+      );
+      DateTime lastProgress = DateTime.now();
 
-      await for (final chunk in stream) {
-        await remoteFile.write(Stream.value(Uint8List.fromList(chunk)));
-        uploaded += chunk.length;
+      final writer = remoteFile.write(
+        stream,
+        onProgress: (totalWritten) {
+          if (onProgress != null && fileSize > 0) {
+            final now = DateTime.now();
+            if (now.difference(lastProgress).inMilliseconds >= 200 ||
+                totalWritten >= fileSize) {
+              lastProgress = now;
+              onProgress(totalWritten, fileSize);
+            }
+          }
+        },
+      );
 
-        if (onProgress != null && fileSize > 0) {
-          onProgress(uploaded, fileSize);
-        }
-      }
+      await writer.done;
+      await remoteFile.close();
 
       return true;
     } catch (e) {
