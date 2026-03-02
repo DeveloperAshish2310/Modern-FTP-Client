@@ -15,7 +15,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final LocalAuthentication _localAuth = LocalAuthentication();
   bool _appLockEnabled = false;
-  bool _biometricsAvailable = false;
   int _defaultFtpPort = AppConstants.ftpPort;
   int _defaultSftpPort = AppConstants.sftpPort;
   int _connectionTimeout = AppConstants.connectionTimeout;
@@ -30,14 +29,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final canAuth =
-        await _localAuth.canCheckBiometrics ||
-        await _localAuth.isDeviceSupported();
 
     if (!mounted) return;
     setState(() {
       _appLockEnabled = prefs.getBool('app_lock') ?? false;
-      _biometricsAvailable = canAuth;
       _defaultFtpPort =
           prefs.getInt('default_ftp_port') ?? AppConstants.ftpPort;
       _defaultSftpPort =
@@ -99,32 +94,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.lock),
             title: const Text('App Lock'),
-            subtitle: Text(
-              _biometricsAvailable
-                  ? 'Require biometrics to open app'
-                  : 'Biometrics not available on this device',
+            subtitle: const Text(
+              'Require PIN, password, or fingerprint to open app',
             ),
             value: _appLockEnabled,
-            onChanged: _biometricsAvailable
-                ? (val) async {
-                    if (val) {
-                      // Verify biometrics first
-                      try {
-                        final authed = await _localAuth.authenticate(
-                          localizedReason: 'Authenticate to enable App Lock',
-                          options: const AuthenticationOptions(
-                            biometricOnly: false,
-                          ),
-                        );
-                        if (!authed) return;
-                      } catch (_) {
-                        return;
-                      }
-                    }
-                    setState(() => _appLockEnabled = val);
-                    _savePref('app_lock', val);
-                  }
-                : null,
+            onChanged: (val) async {
+              if (val) {
+                // Verify auth works before enabling
+                try {
+                  final authed = await _localAuth.authenticate(
+                    localizedReason: 'Authenticate to enable App Lock',
+                    options: const AuthenticationOptions(biometricOnly: false),
+                  );
+                  if (!authed) return;
+                } catch (_) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Authentication not available on this device',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+              }
+              if (!mounted) return;
+              setState(() => _appLockEnabled = val);
+              _savePref('app_lock', val);
+            },
           ),
 
           // ============ CONNECTION DEFAULTS ============
