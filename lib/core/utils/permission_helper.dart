@@ -107,4 +107,15 @@ class PermissionHelper {
     status = await Permission.manageExternalStorage.status;
     return status.isGranted;
   }
+
+  /// Request notification permission (Android 13+ / API 33+)
+  static Future<bool> requestNotificationPermission() async {
+    if (!Platform.isAndroid) return true;
+
+    final status = await Permission.notification.status;
+    if (status.isGranted) return true;
+
+    final result = await Permission.notification.request();
+    return result.isGranted;
+  }
 }

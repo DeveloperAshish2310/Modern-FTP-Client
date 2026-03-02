@@ -322,7 +322,6 @@ class SFTPService {
       final fileSize = await localFile.length();
       print('[SFTP] Upload: $remotePath ($fileSize bytes)');
 
-      print('[SFTP] Opening remote file...');
       final remoteFile = await _sftpClient!.open(
         remotePath,
         mode:
@@ -330,10 +329,7 @@ class SFTPService {
             SftpFileOpenMode.write |
             SftpFileOpenMode.truncate,
       );
-      print('[SFTP] Remote file opened, starting write...');
 
-      // Simple single-write approach using writeBytes for small files
-      // or chunked for larger ones
       int uploaded = 0;
       final raf = await localFile.open();
 
@@ -353,17 +349,12 @@ class SFTPService {
           );
           uploaded += chunk.length;
 
-          if (uploaded == chunk.length) {
-            print('[SFTP] First chunk written ($uploaded bytes)');
-          }
-
           if (onProgress != null) {
             onProgress(uploaded, fileSize);
           }
         }
       } finally {
         await raf.close();
-        print('[SFTP] Closing remote file...');
         await remoteFile.close();
       }
 

@@ -70,6 +70,7 @@ class _AppGateState extends State<_AppGate> {
           _isChecking = false;
         });
         await PermissionHelper.requestStoragePermission(context);
+        await PermissionHelper.requestNotificationPermission();
       }
       return;
     }
@@ -102,6 +103,7 @@ class _AppGateState extends State<_AppGate> {
           _isChecking = false;
         });
         await PermissionHelper.requestStoragePermission(context);
+        await PermissionHelper.requestNotificationPermission();
       } else {
         setState(() {
           _isChecking = false;
