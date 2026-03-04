@@ -1,3 +1,7 @@
+/// FTP Client - Main application entry point.
+///
+/// Startup flow: Splash Screen → App Lock (if enabled) → Permission Requests → Dashboard.
+/// Uses Provider for state management across connections and theme.
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

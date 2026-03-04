@@ -1,3 +1,8 @@
+/// SFTP Service - SSH File Transfer Protocol implementation.
+///
+/// Uses dartssh2 library for SSH connections and SFTP operations.
+/// Download uses pipelined read() with 64 concurrent 16KB chunks.
+/// Upload uses sequential writeBytes() with 256KB chunks for throughput.
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';

@@ -1,3 +1,8 @@
+/// Transfer Service - Manages background file downloads and uploads.
+///
+/// Handles concurrent transfers with progress tracking, speed calculation,
+/// system notifications, database persistence, and cancel/retry operations.
+/// Uses [ConnectionManager] for protocol-agnostic file operations.
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';

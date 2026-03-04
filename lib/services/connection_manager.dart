@@ -1,3 +1,8 @@
+/// Connection Manager - Unified interface for FTP, SFTP, and FTPS protocols.
+///
+/// Delegates operations to [FTPService] or [SFTPService] based on the
+/// active connection's protocol. Provides a single API for file browsing,
+/// uploads, downloads, and file management operations.
 import '../models/connection_model.dart';
 import '../models/file_item_model.dart';
 import 'ftp_service.dart';
