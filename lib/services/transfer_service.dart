@@ -2,10 +2,13 @@
 ///
 /// Handles concurrent transfers with progress tracking, speed calculation,
 /// system notifications, database persistence, and cancel/retry operations.
-/// Uses [ConnectionManager] for protocol-agnostic file operations.
+/// Each transfer opens its own dedicated [ConnectionManager] so it never
+/// shares a control channel with the file browser (FTP cannot multiplex
+/// commands on one connection) and survives the browser screen closing.
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/connection_model.dart';
 import '../models/transfer_model.dart';
@@ -57,9 +60,16 @@ class TransferService extends ChangeNotifier {
   final List<ActiveTransfer> _activeTransfers = [];
   bool _initialized = false;
 
-  // Cache connection managers for retry
-  final Map<int, ConnectionManager> _connectionManagers = {};
+  // Cache connections for retry
   final Map<int, ConnectionModel> _connections = {};
+
+  // Dedicated connection per running transfer, keyed by DB id
+  final Map<int, ConnectionManager> _transferConnections = {};
+
+  // Limit parallel transfers; servers often cap connections per client
+  static const int _maxConcurrent = 3;
+  int _running = 0;
+  final List<Completer<void>> _waiting = [];
 
   List<ActiveTransfer> get activeTransfers =>
       List.unmodifiable(_activeTransfers);
@@ -91,33 +101,45 @@ class TransferService extends ChangeNotifier {
         ?.createNotificationChannel(channel);
   }
 
-  /// Start a background download
+  /// Start a background download.
+  ///
+  /// [existingId] reuses a history row (resuming an interrupted transfer)
+  /// instead of inserting a new one. [resume] continues a partial local
+  /// file where the protocol supports it (native SFTP on Android).
   Future<void> startDownload({
     required ConnectionModel connection,
-    required ConnectionManager connectionManager,
     required String remotePath,
     required String localPath,
     required String fileName,
     required int fileSize,
+    int? existingId,
+    bool resume = false,
   }) async {
     await init();
 
     // Cache for retry
-    _connectionManagers[connection.id ?? 0] = connectionManager;
     _connections[connection.id ?? 0] = connection;
 
-    // Insert into DB
-    final transfer = TransferModel(
-      connectionId: connection.id ?? 0,
-      fileName: fileName,
-      localPath: localPath,
-      remotePath: remotePath,
-      fileSize: fileSize,
-      type: TransferType.download,
-      status: TransferStatus.inProgress,
-      startedAt: DateTime.now(),
-    );
-    final dbId = await _db.insertTransfer(transfer.toMap());
+    final int dbId;
+    if (existingId != null) {
+      dbId = existingId;
+      await _db.updateTransfer(dbId, {
+        'status': TransferStatus.inProgress.name,
+        'error_message': null,
+      });
+    } else {
+      final transfer = TransferModel(
+        connectionId: connection.id ?? 0,
+        fileName: fileName,
+        localPath: localPath,
+        remotePath: remotePath,
+        fileSize: fileSize,
+        type: TransferType.download,
+        status: TransferStatus.inProgress,
+        startedAt: DateTime.now(),
+      );
+      dbId = await _db.insertTransfer(transfer.toMap());
+    }
 
     // Create active transfer
     final active = ActiveTransfer(
@@ -135,13 +157,12 @@ class TransferService extends ChangeNotifier {
     _showProgressNotification(active);
 
     // Execute download in background
-    _executeDownload(active, connectionManager);
+    _executeDownload(active, connection, resume: resume);
   }
 
   /// Start a background upload
   Future<void> startUpload({
     required ConnectionModel connection,
-    required ConnectionManager connectionManager,
     required String remotePath,
     required String localPath,
     required String fileName,
@@ -150,7 +171,6 @@ class TransferService extends ChangeNotifier {
     await init();
 
     // Cache for retry
-    _connectionManagers[connection.id ?? 0] = connectionManager;
     _connections[connection.id ?? 0] = connection;
 
     final transfer = TransferModel(
@@ -177,7 +197,7 @@ class TransferService extends ChangeNotifier {
     notifyListeners();
 
     _showProgressNotification(active);
-    _executeUpload(active, connectionManager);
+    _executeUpload(active, connection);
   }
 
   /// Cancel an active transfer
@@ -197,35 +217,143 @@ class TransferService extends ChangeNotifier {
       // Show cancelled notification
       _showCompleteNotification(transfer, success: false);
 
-      // Clean up partial file for downloads
-      if (transfer.type == TransferType.download) {
-        try {
-          final file = File(transfer.localPath);
-          if (file.existsSync()) file.deleteSync();
-        } catch (_) {}
+      // Closing the dedicated connection aborts the in-flight transfer;
+      // the partial file is removed once the transfer has stopped.
+      _transferConnections[dbId]?.disconnect();
+    }
+  }
+
+  Future<void> _acquireSlot() async {
+    if (_running < _maxConcurrent) {
+      _running++;
+      return;
+    }
+    final completer = Completer<void>();
+    _waiting.add(completer);
+    await completer.future;
+  }
+
+  void _releaseSlot() {
+    if (_waiting.isNotEmpty) {
+      _waiting.removeAt(0).complete();
+    } else {
+      _running--;
+    }
+  }
+
+  /// Open a dedicated connection for one transfer
+  Future<ConnectionManager> _openTransferConnection(
+    ActiveTransfer active,
+    ConnectionModel connection,
+  ) async {
+    final cm = ConnectionManager();
+    _transferConnections[active.id] = cm;
+    final ok = await cm
+        .connect(connection)
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () => throw Exception('Connection timed out'),
+        );
+    if (!ok) {
+      throw Exception(
+        'Could not open transfer connection to ${connection.host}',
+      );
+    }
+    return cm;
+  }
+
+  Future<void> _closeTransferConnection(ActiveTransfer active) async {
+    final cm = _transferConnections.remove(active.id);
+    try {
+      await cm?.disconnect();
+    } catch (_) {}
+  }
+
+  static const MethodChannel _mediaChannel = MethodChannel(
+    'com.ftpclient/media',
+  );
+
+  /// Add a downloaded file to Android's MediaStore; files written with the
+  /// File API are otherwise invisible to Gallery and the Files app.
+  void _scanMedia(String path) {
+    if (!Platform.isAndroid) return;
+    _mediaChannel
+        .invokeMethod('scanFile', {'path': path})
+        .catchError((Object e) => debugPrint('Media scan failed: $e'));
+  }
+
+  /// Look up a connection, falling back to the DB after an app restart
+  Future<ConnectionModel?> _getConnection(int connectionId) async {
+    final cached = _connections[connectionId];
+    if (cached != null) return cached;
+    final row = await _db.getConnection(connectionId);
+    if (row == null) return null;
+    return _connections[connectionId] = ConnectionModel.fromMap(row);
+  }
+
+  bool _resumeChecked = false;
+
+  /// Restart downloads left "in progress" when the app was killed.
+  /// Downloads resume from the partial file; uploads can't be resumed and
+  /// are marked failed so the user can retry them.
+  Future<void> resumeInterrupted() async {
+    if (_resumeChecked) return;
+    _resumeChecked = true;
+
+    final rows = await _db.getTransferHistory(limit: 200);
+    final activeIds = _activeTransfers.map((t) => t.id).toSet();
+    final stale = rows
+        .map(TransferModel.fromMap)
+        .where(
+          (t) =>
+              t.status == TransferStatus.inProgress &&
+              !activeIds.contains(t.id),
+        )
+        .toList();
+
+    // Rows are newest first: resume only the newest per local file so two
+    // transfers never write the same file
+    final seenPaths = <String>{};
+    for (final t in stale) {
+      final conn = await _getConnection(t.connectionId);
+      if (t.type == TransferType.download &&
+          conn != null &&
+          seenPaths.add(t.localPath)) {
+        await startDownload(
+          connection: conn,
+          remotePath: t.remotePath,
+          localPath: t.localPath,
+          fileName: t.fileName,
+          fileSize: t.fileSize,
+          existingId: t.id,
+          resume: true,
+        );
+      } else {
+        await _db.updateTransfer(t.id!, {
+          'status': TransferStatus.failed.name,
+          'error_message': 'Interrupted: app was closed',
+        });
       }
     }
   }
 
   /// Retry a failed/cancelled transfer from history
   Future<bool> retryTransfer(TransferModel transfer) async {
-    final cm = _connectionManagers[transfer.connectionId];
-    final conn = _connections[transfer.connectionId];
-    if (cm == null || conn == null) return false;
+    final conn = await _getConnection(transfer.connectionId);
+    if (conn == null) return false;
 
     if (transfer.type == TransferType.download) {
       await startDownload(
         connection: conn,
-        connectionManager: cm,
         remotePath: transfer.remotePath,
         localPath: transfer.localPath,
         fileName: transfer.fileName,
         fileSize: transfer.fileSize,
+        resume: true,
       );
     } else {
       await startUpload(
         connection: conn,
-        connectionManager: cm,
         remotePath: transfer.remotePath,
         localPath: transfer.localPath,
         fileName: transfer.fileName,
@@ -238,20 +366,38 @@ class TransferService extends ChangeNotifier {
   /// Execute download
   Future<void> _executeDownload(
     ActiveTransfer active,
-    ConnectionManager cm,
-  ) async {
+    ConnectionModel connection, {
+    bool resume = false,
+  }) async {
     DateTime lastNotify = DateTime.now();
+    bool started = false;
+    int? baseBytes; // bytes already on disk when resuming
+    await _acquireSlot();
     try {
+      if (active.status == TransferStatus.cancelled) {
+        throw Exception('Cancelled');
+      }
+      final cm = await _openTransferConnection(active, connection);
+      if (active.status == TransferStatus.cancelled) {
+        throw Exception('Cancelled');
+      }
+
+      // Measure speed from when bytes start flowing, not from queueing
+      active.startedAt = DateTime.now();
+      started = true;
       await cm.downloadFile(
         remotePath: active.remotePath,
         localPath: active.localPath,
         isCancelled: () => active.status == TransferStatus.cancelled,
+        resume: resume,
         onProgress: (downloaded, total) {
+          if (active.status == TransferStatus.cancelled) return;
           active.bytesTransferred = downloaded;
+          baseBytes ??= downloaded;
           final now = DateTime.now();
           final elapsed = now.difference(active.startedAt).inMilliseconds;
           if (elapsed > 0) {
-            active.speed = downloaded / elapsed * 1000;
+            active.speed = (downloaded - baseBytes!) / elapsed * 1000;
           }
           // Throttle UI + notification updates
           if (now.difference(lastNotify).inMilliseconds >= 500) {
@@ -262,10 +408,15 @@ class TransferService extends ChangeNotifier {
         },
       );
 
+      if (active.status == TransferStatus.cancelled) {
+        throw Exception('Cancelled');
+      }
+
       // Success
       active.status = TransferStatus.completed;
       active.bytesTransferred = active.fileSize;
       notifyListeners(); // Tell UI we're done NOW
+      _scanMedia(active.localPath);
       await _db.updateTransfer(active.id, {
         'status': TransferStatus.completed.name,
         'completed_at': DateTime.now().millisecondsSinceEpoch,
@@ -274,11 +425,14 @@ class TransferService extends ChangeNotifier {
       _showCompleteNotification(active, success: true);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
-      if (msg.contains('Cancelled')) {
-        active.status = TransferStatus.cancelled;
-        await _db.updateTransfer(active.id, {
-          'status': TransferStatus.cancelled.name,
-        });
+      if (active.status == TransferStatus.cancelled) {
+        // cancelTransfer already updated DB + notification; drop partial file
+        if (started) {
+          try {
+            final file = File(active.localPath);
+            if (await file.exists()) await file.delete();
+          } catch (_) {}
+        }
       } else {
         active.status = TransferStatus.failed;
         active.errorMessage = msg;
@@ -286,9 +440,11 @@ class TransferService extends ChangeNotifier {
           'status': TransferStatus.failed.name,
           'error_message': msg,
         });
+        _showCompleteNotification(active, success: false);
       }
-      _showCompleteNotification(active, success: false);
     } finally {
+      await _closeTransferConnection(active);
+      _releaseSlot();
       _activeTransfers.remove(active);
       notifyListeners();
     }
@@ -297,9 +453,14 @@ class TransferService extends ChangeNotifier {
   /// Execute upload
   Future<void> _executeUpload(
     ActiveTransfer active,
-    ConnectionManager cm,
+    ConnectionModel connection,
   ) async {
+    await _acquireSlot();
     try {
+      if (active.status == TransferStatus.cancelled) {
+        throw Exception('Cancelled');
+      }
+      final cm = await _openTransferConnection(active, connection);
       await cm.uploadFile(
         localPath: active.localPath,
         remotePath: active.remotePath,
@@ -314,15 +475,19 @@ class TransferService extends ChangeNotifier {
 
       _showCompleteNotification(active, success: true);
     } catch (e) {
-      final msg = e.toString().replaceAll('Exception: ', '');
-      active.status = TransferStatus.failed;
-      active.errorMessage = msg;
-      await _db.updateTransfer(active.id, {
-        'status': TransferStatus.failed.name,
-        'error_message': msg,
-      });
-      _showCompleteNotification(active, success: false);
+      if (active.status != TransferStatus.cancelled) {
+        final msg = e.toString().replaceAll('Exception: ', '');
+        active.status = TransferStatus.failed;
+        active.errorMessage = msg;
+        await _db.updateTransfer(active.id, {
+          'status': TransferStatus.failed.name,
+          'error_message': msg,
+        });
+        _showCompleteNotification(active, success: false);
+      }
     } finally {
+      await _closeTransferConnection(active);
+      _releaseSlot();
       _activeTransfers.remove(active);
       notifyListeners();
     }

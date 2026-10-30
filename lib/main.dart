@@ -9,6 +9,7 @@ import 'package:local_auth/local_auth.dart';
 import 'providers/theme_provider.dart';
 import 'providers/connection_provider.dart';
 import 'core/utils/permission_helper.dart';
+import 'services/transfer_service.dart';
 import 'ui/screens/dashboard_screen.dart';
 import 'ui/screens/splash_screen.dart';
 
@@ -82,6 +83,7 @@ class _AppGateState extends State<_AppGate> {
         });
         await PermissionHelper.requestStoragePermission(context);
         await PermissionHelper.requestNotificationPermission();
+        TransferService().resumeInterrupted();
       }
       return;
     }
@@ -115,6 +117,7 @@ class _AppGateState extends State<_AppGate> {
         });
         await PermissionHelper.requestStoragePermission(context);
         await PermissionHelper.requestNotificationPermission();
+        TransferService().resumeInterrupted();
       } else {
         setState(() {
           _isChecking = false;

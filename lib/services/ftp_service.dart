@@ -34,6 +34,12 @@ class FTPService {
       final isConnected = await _ftpConnect!.connect();
       _isConnected = isConnected;
 
+      // Servers default to ASCII mode, which corrupts binary files (CR/LF
+      // translation) and makes some servers refuse SIZE. Force binary.
+      if (isConnected) {
+        await _ftpConnect!.setTransferType(TransferType.binary);
+      }
+
       return isConnected;
     } catch (e) {
       debugPrint('FTP Connection Error: $e');
@@ -180,7 +186,7 @@ class FTPService {
   Future<bool> downloadFile({
     required String remotePath,
     required String localPath,
-    Function(double)? onProgress,
+    Function(int, int)? onProgress,
   }) async {
     if (!_isConnected || _ftpConnect == null) {
       throw Exception('Not connected to FTP server');
@@ -205,7 +211,13 @@ class FTPService {
       // Navigate to the correct directory first
       await _ftpConnect!.changeDirectory(dir);
 
-      final result = await _ftpConnect!.downloadFile(fileName, localFile);
+      final result = await _ftpConnect!.downloadFile(
+        fileName,
+        localFile,
+        onProgress: onProgress == null
+            ? null
+            : (_, received, total) => onProgress(received, total),
+      );
 
       // Verify file was actually written
       if (result && await localFile.exists()) {
@@ -227,7 +239,7 @@ class FTPService {
   Future<bool> uploadFile({
     required String localPath,
     required String remotePath,
-    Function(double)? onProgress,
+    Function(int, int)? onProgress,
   }) async {
     if (!_isConnected || _ftpConnect == null) {
       throw Exception('Not connected to FTP server');
@@ -246,7 +258,12 @@ class FTPService {
 
       await _ftpConnect!.changeDirectory(dir);
 
-      final result = await _ftpConnect!.uploadFile(localFile);
+      final result = await _ftpConnect!.uploadFile(
+        localFile,
+        onProgress: onProgress == null
+            ? null
+            : (_, sent, total) => onProgress(sent, total),
+      );
       return result;
     } catch (e) {
       debugPrint('FTP Upload Error: $e');

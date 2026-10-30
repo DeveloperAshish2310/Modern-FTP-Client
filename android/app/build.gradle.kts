@@ -49,6 +49,11 @@ android {
 
     buildTypes {
         release {
+            // JSch loads its algorithms by reflection; keep rules live here
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -64,4 +69,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    // Native SFTP for large downloads (see NativeSftp.kt)
+    implementation("com.github.mwiede:jsch:0.2.26")
 }
