@@ -229,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.code),
             title: const Text('Version'),
-            subtitle: const Text('1.0.0'),
+            subtitle: const Text('1.1.0'),
           ),
         ],
       ),
@@ -408,7 +408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Version 1.0.0',
+              'Version 1.1.0',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.w600,

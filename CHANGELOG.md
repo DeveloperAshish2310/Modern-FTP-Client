@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.1.0] - 2026-11-10
+
+### Server Management (SFTP/SSH servers)
+- Server screen with live CPU, RAM and storage usage, uptime, load average and network speed
+- System info: OS, kernel, CPU model
+- Interactive SSH terminal with extra keys (Esc, Tab, Ctrl, Alt, arrows)
+- Command triggers: save commands per server and run them with one tap, with live output and optional confirmation
+- Docker: list containers with CPU/memory, start/stop/restart, live logs
+- Processes: top processes by CPU or memory with search and kill
+- Services: systemd services with start/stop/restart, status and logs
+- Power: reboot and shut down with confirmation
+- Automatic sudo using the saved password, with clear messages when Docker/systemd is missing or access is denied
+
+### Transfers
+- Fixed downloads getting stuck, failing randomly or running very slowly
+- Native SFTP engine for downloads and uploads: faster and works with large files
+- Interrupted downloads resume automatically after the app restarts
+- Cancel works for downloads, uploads and copies
+- SFTP copy runs on the server instead of through the phone
+- FTP transfers use binary mode (no more corrupted files)
+- Downloaded files appear in Gallery and the Files app
+- Transfer screen no longer freezes at the end of a transfer
+
+### File Browser
+- Automatic reconnect when the connection drops
+- Back button walks up from the default folder before disconnecting
+- Show/hide hidden files
+- Pick the SSH key file instead of typing its path
+
 ## [1.0.0] - 2026-03-03
 
 ### Initial Release

@@ -136,7 +136,7 @@ lib/
 
 ## Version
 
-**1.0.0** — Initial release
+**1.1.0** — Server dashboard, SSH terminal, command triggers, server tools, and reliable transfers. See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
