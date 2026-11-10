@@ -10,13 +10,44 @@ A modern, feature-rich FTP/SFTP/FTPS client for Android built with Flutter.
 - **Transfer Manager** — View active transfers, history, cancel/retry operations
 - **Built-in Text Editor** — View and edit text files with syntax highlighting and line numbers
 - **Connection Management** — Save, organize and quick-connect to your servers
+- **Server Dashboard** — Live CPU, RAM, storage, load average, uptime and network speed for SFTP/SSH servers
+- **SSH Terminal** — Interactive shell with extra keys (Esc, Tab, Ctrl, Alt, arrows)
+- **Command Triggers** — Save commands per server and run them with one tap
+- **Server Tools** — Manage Docker containers, processes, systemd services, and reboot/shut down
+- **Resumable Downloads** — Interrupted SFTP downloads continue automatically
 - **App Lock** — PIN, password, or biometric authentication
 - **Theming** — Dark/Light modes with customizable accent colors
 - **Animated UI** — Smooth page transitions, fade-in animations, and loading skeletons
 
 ## Screenshots
 
-*Run the app to see the full UI experience with animated splash screen.*
+### App
+| Splash | Home |
+|:---:|:---:|
+| <img src="screenshots/app/01-splash.jpeg" width="200" alt="Splash"> | <img src="screenshots/app/02-home.jpeg" width="200" alt="Home"> |
+
+### Server
+| Overview | Terminal |
+|:---:|:---:|
+| <img src="screenshots/server/01-overview.jpeg" width="200" alt="Overview"> | <img src="screenshots/server/02-terminal.jpeg" width="200" alt="Terminal"> |
+
+| Add Trigger | Power |
+|:---:|:---:|
+| <img src="screenshots/server/03-add-trigger.jpeg" width="200" alt="Add Trigger"> | <img src="screenshots/server/04-power-menu.jpeg" width="200" alt="Power"> |
+
+### Tools
+| Docker | Processes | Sort Processes |
+|:---:|:---:|:---:|
+| <img src="screenshots/tools/01-docker.jpeg" width="200" alt="Docker"> | <img src="screenshots/tools/02-processes.jpeg" width="200" alt="Processes"> | <img src="screenshots/tools/03-processes-sort.jpeg" width="200" alt="Sort Processes"> |
+
+| Services (Running) | Services (All) | Services (Failed) |
+|:---:|:---:|:---:|
+| <img src="screenshots/tools/04-services-running.jpeg" width="200" alt="Services (Running)"> | <img src="screenshots/tools/05-services-all.jpeg" width="200" alt="Services (All)"> | <img src="screenshots/tools/06-services-failed.jpeg" width="200" alt="Services (Failed)"> |
+
+### File Manager
+| File Browser | File Actions |
+|:---:|:---:|
+| <img src="screenshots/files/01-file-browser.jpeg" width="200" alt="File Browser"> | <img src="screenshots/files/02-file-actions.jpeg" width="200" alt="File Actions"> |
 
 ## Getting Started
 
