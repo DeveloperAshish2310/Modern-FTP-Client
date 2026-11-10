@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - FTP Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a1929;
+            color: #e0e0e0;
+            line-height: 1.7;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+        h1 {
+            font-size: 2rem;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+        .app-name {
+            color: #42a5f5;
+            font-size: 1rem;
+            margin-bottom: 4px;
+        }
+        .last-updated {
+            color: #90a4ae;
+            font-size: 0.85rem;
+            margin-bottom: 32px;
+        }
+        h2 {
+            font-size: 1.3rem;
+            color: #42a5f5;
+            margin: 28px 0 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #1a3a5c;
+        }
+        p { margin-bottom: 14px; }
+        ul {
+            margin: 8px 0 14px 24px;
+        }
+        li { margin-bottom: 6px; }
+        .highlight {
+            background: #0d2137;
+            border-left: 3px solid #42a5f5;
+            padding: 14px 18px;
+            border-radius: 6px;
+            margin: 14px 0;
+        }
+        a { color: #42a5f5; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .footer {
+            margin-top: 48px;
+            padding-top: 24px;
+            border-top: 1px solid #1a3a5c;
+            text-align: center;
+            color: #607d8b;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p class="app-name">FTP Client by YuvaByte Technologies</p>
+        <h1>Privacy Policy</h1>
+        <p class="last-updated">Last updated: March 5, 2026</p>
+
+        <p>YuvaByte Technologies ("we", "our", or "us") built the <strong>FTP Client</strong> app. This page informs you of our policies regarding the collection, use, and disclosure of personal information when you use our app.</p>
+
+        <h2>Information We Collect</h2>
+        <div class="highlight">
+            <strong>We do not collect, store, or transmit any personal data to external servers.</strong> All data stays on your device.
+        </div>
+        <p>The app stores the following information <strong>locally on your device only</strong>:</p>
+        <ul>
+            <li><strong>Server connection details</strong> — Hostname, port, username, and password for your FTP/SFTP/FTPS servers. These are stored in a local SQLite database on your device.</li>
+            <li><strong>Transfer history</strong> — Records of file uploads and downloads, stored locally for your reference.</li>
+            <li><strong>App preferences</strong> — Theme settings, accent color, default ports, and other configuration choices.</li>
+        </ul>
+
+        <h2>Credential Storage</h2>
+        <p>Server passwords are stored locally using Flutter Secure Storage, which uses Android's EncryptedSharedPreferences (AES-256 encryption). Your credentials never leave your device and are never transmitted to us or any third party.</p>
+
+        <h2>Network Activity</h2>
+        <p>The app connects <strong>only</strong> to the servers you explicitly configure. We do not operate any backend servers. Network connections are made solely for:</p>
+        <ul>
+            <li>Connecting to your FTP, SFTP, or FTPS servers</li>
+            <li>Browsing, uploading, and downloading files</li>
+            <li>Performing file management operations on your servers</li>
+        </ul>
+        <p>No analytics, tracking, advertising, or telemetry data is sent anywhere.</p>
+
+        <h2>Permissions</h2>
+        <p>The app requests the following Android permissions:</p>
+        <ul>
+            <li><strong>Internet</strong> — To connect to your configured servers.</li>
+            <li><strong>Storage</strong> — To download files to and upload files from your device.</li>
+            <li><strong>Notifications</strong> — To show file transfer progress and completion alerts.</li>
+            <li><strong>Biometric / Fingerprint</strong> — For the optional app lock feature. Biometric data is handled entirely by Android's system and is never accessed by the app.</li>
+        </ul>
+
+        <h2>Third-Party Services</h2>
+        <p>This app does <strong>not</strong> use any third-party services such as:</p>
+        <ul>
+            <li>Google Analytics or Firebase</li>
+            <li>Advertising networks</li>
+            <li>Crash reporting services</li>
+            <li>Social media SDKs</li>
+        </ul>
+
+        <h2>Data Security</h2>
+        <p>We take the security of your data seriously. Server credentials are encrypted using AES-256 via Android's secure storage. All SFTP connections use SSH encryption. FTPS connections use SSL/TLS encryption. However, no method of electronic storage is 100% secure, and we cannot guarantee absolute security.</p>
+
+        <h2>Children's Privacy</h2>
+        <p>This app is not directed at children under the age of 13. We do not knowingly collect personal information from children.</p>
+
+        <h2>Changes to This Policy</h2>
+        <p>We may update this Privacy Policy from time to time. Changes will be posted on this page with an updated date. You are advised to review this page periodically.</p>
+
+        <h2>Contact Us</h2>
+        <p>If you have any questions about this Privacy Policy, please contact us:</p>
+        <div class="highlight">
+            <strong>Developer:</strong> Ashish<br>
+            <strong>Company:</strong> YuvaByte Technologies<br>
+            <strong>Email:</strong> <a href="mailto:DeveloperAshish2310@gmail.com">DeveloperAshish2310@gmail.com</a>
+        </div>
+
+        <div class="footer">
+            &copy; 2026 YuvaByte Technologies. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

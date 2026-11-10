@@ -10,6 +10,7 @@ import 'package:dartssh2/dartssh2.dart';
 import '../models/connection_model.dart';
 import '../models/file_item_model.dart';
 import 'native_sftp.dart';
+import 'ssh_service.dart';
 
 /// SFTP service implementation using dartssh2 library
 class SFTPService {
@@ -23,71 +24,21 @@ class SFTPService {
   bool get isConnected => _isConnected;
   ConnectionModel? get connection => _connection;
 
-  /// Connect to SFTP server.
-  ///
-  /// Retries when the server drops the connection during the handshake
-  /// (SSHAuthAbortError), which sshd does transiently under MaxStartups
-  /// or right after previous sessions were killed. Wrong credentials
-  /// (SSHAuthFailError) are not retried.
+  /// Connect to SFTP server (auth + handshake retry via [openSshClient])
   Future<bool> connect(ConnectionModel connection) async {
-    const maxAttempts = 3;
-    for (var attempt = 1; ; attempt++) {
-      try {
-        return await _connectOnce(connection);
-      } on SSHAuthAbortError catch (e) {
-        _sshClient?.close();
-        _sshClient = null;
-        if (attempt >= maxAttempts) {
-          debugPrint('SFTP Connection Error: $e');
-          _isConnected = false;
-          return false;
-        }
-        debugPrint('SFTP handshake dropped (attempt $attempt), retrying...');
-        await Future.delayed(Duration(milliseconds: 500 * attempt));
-      } catch (e) {
-        debugPrint('SFTP Connection Error: $e');
-        _isConnected = false;
-        return false;
-      }
+    try {
+      _connection = connection;
+      _sshClient = await openSshClient(connection);
+      _sftpClient = await _sshClient!.sftp();
+      _isConnected = true;
+      return true;
+    } catch (e) {
+      debugPrint('SFTP Connection Error: $e');
+      _sshClient?.close();
+      _sshClient = null;
+      _isConnected = false;
+      return false;
     }
-  }
-
-  Future<bool> _connectOnce(ConnectionModel connection) async {
-    _connection = connection;
-
-    final socket = await SSHSocket.connect(
-      connection.host,
-      connection.port,
-      timeout: const Duration(seconds: 30),
-    );
-
-    // Authenticate with password or SSH key
-    if (connection.sshKeyPath != null && connection.sshKeyPath!.isNotEmpty) {
-      // SSH key authentication
-      final keyFile = File(connection.sshKeyPath!);
-      if (await keyFile.exists()) {
-        final keyContent = await keyFile.readAsString();
-        _sshClient = SSHClient(
-          socket,
-          username: connection.username,
-          identities: [...SSHKeyPair.fromPem(keyContent)],
-        );
-      } else {
-        throw Exception('SSH key file not found');
-      }
-    } else {
-      // Password authentication
-      _sshClient = SSHClient(
-        socket,
-        username: connection.username,
-        onPasswordRequest: () => connection.password ?? '',
-      );
-    }
-
-    _sftpClient = await _sshClient!.sftp();
-    _isConnected = true;
-
-    return true;
   }
 
   /// Disconnect from SFTP server
