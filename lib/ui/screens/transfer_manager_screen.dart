@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
@@ -26,6 +27,7 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _transferService.addListener(_onTransferUpdate);
+    _lastActiveCount = _transferService.activeCount;
     // Defer DB load so the screen renders immediately
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
   }
@@ -33,19 +35,43 @@ class _TransferManagerScreenState extends State<TransferManagerScreen>
   @override
   void dispose() {
     _transferService.removeListener(_onTransferUpdate);
+    _pendingUIUpdate?.cancel();
     _tabController.dispose();
     super.dispose();
   }
 
   DateTime _lastUIUpdate = DateTime.now();
+  Timer? _pendingUIUpdate;
+  int _lastActiveCount = 0;
 
   void _onTransferUpdate() {
     if (!mounted) return;
-    final now = DateTime.now();
-    // Throttle: max 2 rebuilds/sec
-    if (now.difference(_lastUIUpdate).inMilliseconds >= 500) {
-      _lastUIUpdate = now;
+
+    // A transfer finished: refresh immediately and pull it into History
+    final activeCount = _transferService.activeCount;
+    if (activeCount < _lastActiveCount) {
+      _lastActiveCount = activeCount;
+      _pendingUIUpdate?.cancel();
+      _lastUIUpdate = DateTime.now();
       setState(() {});
+      _loadHistory();
+      return;
+    }
+    _lastActiveCount = activeCount;
+
+    // Throttle: max 2 rebuilds/sec, but never drop the trailing update
+    final elapsed = DateTime.now().difference(_lastUIUpdate).inMilliseconds;
+    if (elapsed >= 500) {
+      _pendingUIUpdate?.cancel();
+      _lastUIUpdate = DateTime.now();
+      setState(() {});
+    } else {
+      _pendingUIUpdate ??= Timer(Duration(milliseconds: 500 - elapsed), () {
+        _pendingUIUpdate = null;
+        if (!mounted) return;
+        _lastUIUpdate = DateTime.now();
+        setState(() {});
+      });
     }
   }
 

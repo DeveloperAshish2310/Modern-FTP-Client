@@ -1,4 +1,7 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../providers/connection_provider.dart';
 import '../../models/connection_model.dart';
@@ -70,6 +73,44 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
     _sshKeyController.dispose();
     _remoteDirController.dispose();
     super.dispose();
+  }
+
+  /// Pick a private key and copy it into app-private storage: the picker
+  /// returns a cache copy Android may delete, and keys shouldn't sit in
+  /// shared storage.
+  Future<void> _pickSshKey() async {
+    final result = await FilePicker.platform.pickFiles();
+    final picked = result?.files.single;
+    if (picked?.path == null) return;
+
+    final source = File(picked!.path!);
+    String content;
+    try {
+      content = await source.readAsString();
+    } catch (_) {
+      content = '';
+    }
+    if (!content.contains('PRIVATE KEY')) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That file is not an SSH private key (e.g. id_ed25519)'),
+        ),
+      );
+      return;
+    }
+
+    final dir = Directory(
+      '${(await getApplicationSupportDirectory()).path}/ssh_keys',
+    );
+    await dir.create(recursive: true);
+    final dest = File(
+      '${dir.path}/${DateTime.now().millisecondsSinceEpoch}_${picked.name}',
+    );
+    await dest.writeAsString(content);
+
+    if (!mounted) return;
+    setState(() => _sshKeyController.text = dest.path);
   }
 
   @override
@@ -234,11 +275,21 @@ class _AddConnectionScreenState extends State<AddConnectionScreen> {
                 children: [
                   TextFormField(
                     controller: _sshKeyController,
-                    decoration: const InputDecoration(
-                      labelText: 'SSH Key Path (Optional)',
-                      hintText: '/path/to/private/key',
-                      prefixIcon: Icon(Icons.key),
+                    readOnly: true,
+                    onTap: _pickSshKey,
+                    decoration: InputDecoration(
+                      labelText: 'SSH Private Key (Optional)',
+                      hintText: 'Tap to select key file',
+                      prefixIcon: const Icon(Icons.key),
                       helperText: 'Leave empty to use password authentication',
+                      suffixIcon: _sshKeyController.text.isEmpty
+                          ? const Icon(Icons.folder_open)
+                          : IconButton(
+                              icon: const Icon(Icons.clear),
+                              tooltip: 'Remove key',
+                              onPressed: () =>
+                                  setState(() => _sshKeyController.clear()),
+                            ),
                     ),
                   ),
                   const SizedBox(height: 16),

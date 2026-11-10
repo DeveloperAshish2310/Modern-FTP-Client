@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -65,6 +65,8 @@ class DatabaseHelper {
       )
     ''');
 
+    await _createTriggersTable(db);
+
     // Settings table
     await db.execute('''
       CREATE TABLE settings (
@@ -100,6 +102,24 @@ class DatabaseHelper {
         'ALTER TABLE connections ADD COLUMN remote_directory TEXT DEFAULT "/"',
       );
     }
+    if (oldVersion < 3) {
+      await _createTriggersTable(db);
+    }
+  }
+
+  // Saved SSH command triggers, one set per connection
+  Future<void> _createTriggersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE triggers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        connection_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        confirm INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (connection_id) REFERENCES connections (id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   // Connection CRUD operations
@@ -135,6 +155,8 @@ class DatabaseHelper {
 
   Future<int> deleteConnection(int id) async {
     final db = await database;
+    // Foreign keys are off in sqflite by default, so cascade by hand
+    await db.delete('triggers', where: 'connection_id = ?', whereArgs: [id]);
     return await db.delete('connections', where: 'id = ?', whereArgs: [id]);
   }
 
@@ -173,6 +195,37 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // Trigger CRUD operations
+  Future<List<Map<String, dynamic>>> getTriggers({int? connectionId}) async {
+    final db = await database;
+    return await db.query(
+      'triggers',
+      where: connectionId != null ? 'connection_id = ?' : null,
+      whereArgs: connectionId != null ? [connectionId] : null,
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  Future<int> insertTrigger(Map<String, dynamic> trigger) async {
+    final db = await database;
+    return await db.insert('triggers', trigger);
+  }
+
+  Future<int> updateTrigger(int id, Map<String, dynamic> trigger) async {
+    final db = await database;
+    return await db.update(
+      'triggers',
+      trigger,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> deleteTrigger(int id) async {
+    final db = await database;
+    return await db.delete('triggers', where: 'id = ?', whereArgs: [id]);
   }
 
   // Settings operations

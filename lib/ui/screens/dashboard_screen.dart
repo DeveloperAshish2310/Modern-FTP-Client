@@ -6,6 +6,7 @@ import '../../core/utils/page_transitions.dart';
 import '../widgets/shimmer_loading.dart';
 import 'add_connection_screen.dart';
 import 'file_browser_screen.dart';
+import 'server_overview_screen.dart';
 import 'transfer_manager_screen.dart';
 import 'settings_screen.dart';
 
@@ -308,10 +309,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// SFTP servers open the server screen (stats, files, terminal,
+  /// triggers); plain FTP goes straight to the file browser
   void _handleConnect(BuildContext context, ConnectionModel connection) {
     Navigator.push(
       context,
-      SlidePageRoute(page: FileBrowserScreen(connection: connection)),
+      SlidePageRoute(
+        page: connection.protocol == ConnectionProtocol.sftp
+            ? ServerOverviewScreen(connection: connection)
+            : FileBrowserScreen(connection: connection),
+      ),
     );
   }
 

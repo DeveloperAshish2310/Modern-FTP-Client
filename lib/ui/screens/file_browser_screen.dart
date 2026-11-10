@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -119,6 +120,26 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
   // Search
   String _searchQuery = '';
+
+  // Hidden (dot) files, persisted across sessions
+  static const _showHiddenKey = 'show_hidden_files';
+  bool _showHidden = true;
+
+  List<FileItemModel> get _visibleFiles => _showHidden
+      ? _files
+      : _files.where((f) => !f.name.startsWith('.')).toList();
+
+  Future<void> _loadHiddenPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getBool(_showHiddenKey);
+    if (value != null && mounted) setState(() => _showHidden = value);
+  }
+
+  Future<void> _toggleHidden() async {
+    setState(() => _showHidden = !_showHidden);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showHiddenKey, _showHidden);
+  }
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
 
@@ -133,6 +154,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   @override
   void initState() {
     super.initState();
+    _loadHiddenPref();
     _connect();
   }
 
@@ -169,12 +191,15 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
         // Try remote directory first, fallback to /
         final initialDir = widget.connection.remoteDirectory;
         if (initialDir != '/') {
-          try {
-            await _loadDirectory(initialDir);
+          // _loadDirectory reports failures via _errorMessage, not throws
+          await _loadDirectory(initialDir);
+          if (!mounted) return;
+          if (_errorMessage == null) {
+            // Seed history with the ancestors so Back walks up to / first
+            setState(() => _pathHistory = _ancestorPaths(initialDir));
             return;
-          } catch (_) {
-            // Path invalid, fallback
           }
+          // Path invalid, fallback
         }
         await _loadDirectory('/');
       } else {
@@ -238,6 +263,16 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
   void _navigateTo(String path) {
     _pathHistory.add(path);
     _loadDirectory(path);
+  }
+
+  /// '/home/user' -> ['/', '/home', '/home/user']
+  List<String> _ancestorPaths(String path) {
+    final parts = path.split('/').where((p) => p.isNotEmpty).toList();
+    return [
+      '/',
+      for (int i = 0; i < parts.length; i++)
+        '/${parts.sublist(0, i + 1).join('/')}',
+    ];
   }
 
   void _navigateUp() {
@@ -350,7 +385,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
   void _selectAll() {
     setState(() {
-      _selectedPaths.addAll(_files.map((f) => f.path));
+      _selectedPaths.addAll(_visibleFiles.map((f) => f.path));
     });
   }
 
@@ -456,9 +491,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           _transferStatus = 'Uploading: ${file.name}';
         });
 
+        final remotePath = '$_currentPath/${file.name}';
         try {
-          final remotePath = '$_currentPath/${file.name}';
-
           // Quick exists check with timeout — don't block upload
           bool fileExists = false;
           try {
@@ -485,14 +519,32 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
             }
           }
 
+          final baseBytes = _transferredBytes;
+          DateTime lastUi = DateTime.now();
           await _connectionManager.uploadFile(
             localPath: file.path!,
             remotePath: remotePath,
+            isCancelled: () => _cancelRequested,
+            onProgress: (sent, total) {
+              final now = DateTime.now();
+              if (!mounted || now.difference(lastUi).inMilliseconds < 250) {
+                return;
+              }
+              lastUi = now;
+              setState(() => _transferredBytes = baseBytes + sent);
+            },
           );
           uploaded++;
-          _transferredBytes += File(file.path!).lengthSync();
+          _transferredBytes = baseBytes + File(file.path!).lengthSync();
           setState(() => _fileDone = uploaded + skipped + failed);
         } catch (e) {
+          if (_cancelRequested) {
+            // Remove the partially uploaded file
+            try {
+              await _connectionManager.deleteFile(remotePath);
+            } catch (_) {}
+            break;
+          }
           failed++;
           lastError = e.toString().replaceAll('Exception: ', '');
           debugPrint('Upload failed for ${file.name}: $e');
@@ -584,7 +636,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
       final transferService = TransferService();
       await transferService.startDownload(
         connection: widget.connection,
-        connectionManager: _connectionManager,
         remotePath: file.path,
         localPath: localPath,
         fileName: file.name,
@@ -651,7 +702,6 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
       await transferService.startDownload(
         connection: widget.connection,
-        connectionManager: _connectionManager,
         remotePath: file.path,
         localPath: localPath,
         fileName: file.name,
@@ -801,6 +851,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     setState(() {
       _isTransferring = true;
+      _cancelRequested = false;
       _transferStatus = 'Pasting...';
     });
 
@@ -809,6 +860,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     int skipped = 0;
 
     for (final file in _clipboard!.files) {
+      if (_cancelRequested) break;
       final newPath = '$_currentPath/${file.name}';
 
       try {
@@ -835,31 +887,48 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
           final result = await _connectionManager.rename(file.path, newPath);
           result ? succeeded++ : failed++;
         } else {
-          // Copy: download temp, upload to new location
-          final tempDir = await getTemporaryDirectory();
-          final tempPath = '${tempDir.path}/${file.name}';
-
           if (file.isDirectory) {
             failed++;
             continue;
           }
 
-          await _connectionManager.downloadFile(
-            remotePath: file.path,
-            localPath: tempPath,
-          );
-          await _connectionManager.uploadFile(
-            localPath: tempPath,
-            remotePath: newPath,
-          );
+          setState(() => _transferStatus = 'Copying: ${file.name}');
 
-          // Clean up temp file
-          final tempFile = File(tempPath);
-          if (await tempFile.exists()) await tempFile.delete();
-          succeeded++;
+          // Fast path: copy on the server itself (SFTP via `cp`)
+          if (await _connectionManager.copyFileOnServer(file.path, newPath)) {
+            succeeded++;
+            continue;
+          }
+
+          // Fallback: download temp, upload to new location
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/${file.name}');
+          try {
+            await _connectionManager.downloadFile(
+              remotePath: file.path,
+              localPath: tempFile.path,
+              isCancelled: () => _cancelRequested,
+            );
+            if (_cancelRequested) throw Exception('Cancelled');
+            await _connectionManager.uploadFile(
+              localPath: tempFile.path,
+              remotePath: newPath,
+              isCancelled: () => _cancelRequested,
+            );
+            succeeded++;
+          } finally {
+            if (await tempFile.exists()) await tempFile.delete();
+          }
         }
       } catch (e) {
-        failed++;
+        if (_cancelRequested) {
+          // Remove the partially uploaded copy
+          try {
+            await _connectionManager.deleteFile(newPath);
+          } catch (_) {}
+        } else {
+          failed++;
+        }
         debugPrint('Paste failed for ${file.name}: $e');
       }
     }
@@ -875,6 +944,7 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
     if (succeeded > 0) parts.add('$actionName $succeeded');
     if (skipped > 0) parts.add('$skipped skipped');
     if (failed > 0) parts.add('$failed failed');
+    if (_cancelRequested) parts.add('cancelled');
 
     ScaffoldMessenger.of(
       context,
@@ -1032,6 +1102,19 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
+              PopupMenuItem(
+                value: 'hidden',
+                child: ListTile(
+                  leading: Icon(
+                    _showHidden ? Icons.visibility_off : Icons.visibility,
+                  ),
+                  title: Text(
+                    _showHidden ? 'Hide hidden files' : 'Show hidden files',
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
               const PopupMenuItem(
                 value: 'disconnect',
                 child: ListTile(
@@ -1061,6 +1144,9 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
                   break;
                 case 'sort':
                   _showSortDialog();
+                  break;
+                case 'hidden':
+                  _toggleHidden();
                   break;
                 case 'disconnect':
                   _connectionManager.disconnect();
@@ -1295,8 +1381,8 @@ class _FileBrowserScreenState extends State<FileBrowserScreen> {
 
     // File list
     final filteredFiles = _searchQuery.isEmpty
-        ? _files
-        : _files
+        ? _visibleFiles
+        : _visibleFiles
               .where(
                 (f) =>
                     f.name.toLowerCase().contains(_searchQuery.toLowerCase()),

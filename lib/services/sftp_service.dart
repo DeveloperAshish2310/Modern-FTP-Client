@@ -1,16 +1,21 @@
 /// SFTP Service - SSH File Transfer Protocol implementation.
 ///
 /// Uses dartssh2 library for SSH connections and SFTP operations.
-/// Download uses pipelined read() with 64 concurrent 16KB chunks.
+/// Download uses pipelined downloadToRandomAccess() with a stall watchdog.
 /// Upload uses sequential writeBytes() with 256KB chunks for throughput.
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:dartssh2/dartssh2.dart';
 import '../models/connection_model.dart';
 import '../models/file_item_model.dart';
+import 'native_sftp.dart';
+import 'ssh_service.dart';
 
 /// SFTP service implementation using dartssh2 library
 class SFTPService {
+  static const Duration _stallTimeout = Duration(seconds: 60);
+
   SSHClient? _sshClient;
   SftpClient? _sftpClient;
   ConnectionModel? _connection;
@@ -19,46 +24,18 @@ class SFTPService {
   bool get isConnected => _isConnected;
   ConnectionModel? get connection => _connection;
 
-  /// Connect to SFTP server
+  /// Connect to SFTP server (auth + handshake retry via [openSshClient])
   Future<bool> connect(ConnectionModel connection) async {
     try {
       _connection = connection;
-
-      final socket = await SSHSocket.connect(
-        connection.host,
-        connection.port,
-        timeout: const Duration(seconds: 30),
-      );
-
-      // Authenticate with password or SSH key
-      if (connection.sshKeyPath != null && connection.sshKeyPath!.isNotEmpty) {
-        // SSH key authentication
-        final keyFile = File(connection.sshKeyPath!);
-        if (await keyFile.exists()) {
-          final keyContent = await keyFile.readAsString();
-          _sshClient = SSHClient(
-            socket,
-            username: connection.username,
-            identities: [...SSHKeyPair.fromPem(keyContent)],
-          );
-        } else {
-          throw Exception('SSH key file not found');
-        }
-      } else {
-        // Password authentication
-        _sshClient = SSHClient(
-          socket,
-          username: connection.username,
-          onPasswordRequest: () => connection.password ?? '',
-        );
-      }
-
+      _sshClient = await openSshClient(connection);
       _sftpClient = await _sshClient!.sftp();
       _isConnected = true;
-
       return true;
     } catch (e) {
       debugPrint('SFTP Connection Error: $e');
+      _sshClient?.close();
+      _sshClient = null;
       _isConnected = false;
       return false;
     }
@@ -203,10 +180,156 @@ class SFTPService {
     }
   }
 
-  /// Download file using chunked streaming to avoid memory issues
+  /// Download file with pipelined random-access reads.
+  ///
+  /// Chunks are written at their own offset, so out-of-order replies and
+  /// short reads are handled. A watchdog aborts the transfer if no data
+  /// arrives for [_stallTimeout] instead of hanging forever.
   Future<bool> downloadFile({
     required String remotePath,
     required String localPath,
+    Function(int, int)? onProgress,
+    bool Function()? isCancelled,
+    bool resume = false,
+  }) async {
+    if (!_isConnected || _sftpClient == null) {
+      throw Exception('Not connected to SFTP server');
+    }
+
+    // On Android stream natively: dartssh2 buffers on the Dart heap and
+    // runs out of memory on large files.
+    if (NativeSftp.isSupported) {
+      final bytes = await NativeSftp.download(
+        connection: _connection!,
+        remotePath: remotePath,
+        localPath: localPath,
+        onProgress: onProgress,
+        isCancelled: isCancelled,
+        resume: resume,
+      );
+      debugPrint('[SFTP] Native download complete: $bytes bytes');
+      return true;
+    }
+
+    final localFile = File(localPath);
+
+    // Ensure parent directory exists
+    final parentDir = localFile.parent;
+    if (!await parentDir.exists()) {
+      await parentDir.create(recursive: true);
+    }
+
+    // Get file size first
+    final stat = await _sftpClient!.stat(remotePath);
+    final fileSize = stat.size ?? 0;
+    debugPrint('[SFTP] Download: $remotePath ($fileSize bytes)');
+
+    if (fileSize == 0) {
+      await localFile.writeAsBytes(const []);
+      return true;
+    }
+
+    final remoteFile = await _sftpClient!.open(
+      remotePath,
+      mode: SftpFileOpenMode.read,
+    );
+    final raf = await localFile.open(mode: FileMode.write);
+
+    int received = 0;
+    DateTime lastData = DateTime.now();
+    DateTime lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
+    final abort = Completer<void>();
+
+    // Watchdog: cancellation and stall detection
+    final watchdog = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (abort.isCompleted) return;
+      if (isCancelled != null && isCancelled()) {
+        abort.completeError(Exception('Cancelled'));
+      } else if (DateTime.now().difference(lastData) > _stallTimeout) {
+        abort.completeError(
+          Exception(
+            'Transfer stalled: no data for ${_stallTimeout.inSeconds}s '
+            'at ${(received * 100 / fileSize).toStringAsFixed(0)}%',
+          ),
+        );
+      }
+    });
+
+    try {
+      final download = remoteFile.downloadToRandomAccess(
+        raf,
+        length: fileSize,
+        onProgress: (bytesRead) {
+          received = bytesRead;
+          final now = DateTime.now();
+          lastData = now;
+          if (onProgress != null &&
+              now.difference(lastProgress).inMilliseconds >= 200) {
+            lastProgress = now;
+            onProgress(bytesRead, fileSize);
+          }
+        },
+      );
+      // Abandoned reads must not surface as unhandled errors after abort
+      download.ignore();
+      await Future.any([download, abort.future]);
+
+      onProgress?.call(fileSize, fileSize);
+      debugPrint('[SFTP] Download complete: $received bytes');
+      return true;
+    } catch (e) {
+      debugPrint('[SFTP] Download error: $e');
+      rethrow;
+    } finally {
+      watchdog.cancel();
+      if (!abort.isCompleted) abort.complete();
+      try {
+        await remoteFile.close();
+      } catch (_) {}
+      try {
+        await raf.close();
+      } catch (_) {}
+    }
+  }
+
+  /// Copy a file on the server with `cp` over SSH, so no data passes
+  /// through the device. Returns false if the server refuses command
+  /// execution (e.g. SFTP-only accounts) so the caller can fall back.
+  Future<bool> copyFileOnServer(String sourcePath, String destPath) async {
+    if (!_isConnected || _sshClient == null) {
+      throw Exception('Not connected to SFTP server');
+    }
+
+    try {
+      final session = await _sshClient!.execute(
+        'cp -- ${_shellQuote(sourcePath)} ${_shellQuote(destPath)}',
+      );
+      final stderr = StringBuffer();
+      session.stdout.drain<void>();
+      session.stderr.listen((d) => stderr.write(String.fromCharCodes(d)));
+      await session.done;
+
+      if (session.exitCode == 0) return true;
+      if (session.exitCode == null) {
+        // Server sent no exit status; verify by comparing sizes
+        final src = await _sftpClient!.stat(sourcePath);
+        final dst = await _sftpClient!.stat(destPath);
+        return src.size != null && src.size == dst.size;
+      }
+      debugPrint('[SFTP] Server copy failed (${session.exitCode}): $stderr');
+      return false;
+    } catch (e) {
+      debugPrint('[SFTP] Server copy unavailable: $e');
+      return false;
+    }
+  }
+
+  static String _shellQuote(String s) => "'${s.replaceAll("'", "'\\''")}'";
+
+  /// Upload file
+  Future<bool> uploadFile({
+    required String localPath,
+    required String remotePath,
     Function(int, int)? onProgress,
     bool Function()? isCancelled,
   }) async {
@@ -214,107 +337,17 @@ class SFTPService {
       throw Exception('Not connected to SFTP server');
     }
 
-    try {
-      final localFile = File(localPath);
-
-      // Ensure parent directory exists
-      final parentDir = localFile.parent;
-      if (!await parentDir.exists()) {
-        await parentDir.create(recursive: true);
-      }
-
-      // Get file size first
-      final stat = await _sftpClient!.stat(remotePath);
-      final fileSize = stat.size ?? 0;
-      print('[SFTP] Download: $remotePath ($fileSize bytes)');
-
-      if (fileSize == 0) {
-        await localFile.create();
-        print('[SFTP] Empty file created');
-        return true;
-      }
-
-      // Open remote file
-      final remoteFile = await _sftpClient!.open(
-        remotePath,
-        mode: SftpFileOpenMode.read,
+    // On Android stream natively (see downloadFile)
+    if (NativeSftp.isSupported) {
+      final bytes = await NativeSftp.upload(
+        connection: _connection!,
+        localPath: localPath,
+        remotePath: remotePath,
+        onProgress: onProgress,
+        isCancelled: isCancelled,
       );
-
-      // Use streaming read() which pipelines 64 x 16KB chunks (1MB in flight)
-      final sink = localFile.openWrite();
-      DateTime lastProgress = DateTime.now();
-      bool cancelled = false;
-      int bytesWritten = 0;
-      int lastFlushAt = 0;
-
-      try {
-        await for (final chunk in remoteFile.read(
-          onProgress: (bytesRead) {
-            if (onProgress != null) {
-              final now = DateTime.now();
-              if (now.difference(lastProgress).inMilliseconds >= 200 ||
-                  bytesRead >= fileSize) {
-                lastProgress = now;
-                onProgress(bytesRead, fileSize);
-              }
-            }
-          },
-        )) {
-          if (isCancelled != null && isCancelled()) {
-            cancelled = true;
-            break;
-          }
-          sink.add(chunk);
-          bytesWritten += chunk.length;
-
-          // Flush to disk every ~1MB to prevent large end-of-transfer stall
-          if (bytesWritten - lastFlushAt >= 1024 * 1024) {
-            await sink.flush();
-            lastFlushAt = bytesWritten;
-          }
-        }
-      } catch (e) {
-        if (!cancelled) rethrow;
-      } finally {
-        await sink.flush();
-        await sink.close();
-        try {
-          await remoteFile.close();
-        } catch (_) {}
-      }
-
-      // Fire 100% progress
-      if (!cancelled && onProgress != null) {
-        onProgress(fileSize, fileSize);
-      }
-
-      if (cancelled) {
-        if (await localFile.exists()) await localFile.delete();
-        throw Exception('Cancelled');
-      }
-
-      final writtenSize = await localFile.length();
-      print('[SFTP] Written: $writtenSize bytes');
-      print('[SFTP] ===== DOWNLOAD COMPLETE =====');
-
-      if (writtenSize == 0 && fileSize > 0) {
-        throw Exception('0 bytes written (expected $fileSize)');
-      }
+      debugPrint('[SFTP] Native upload complete: $bytes bytes');
       return true;
-    } catch (e) {
-      print('[SFTP] ERROR: $e');
-      rethrow;
-    }
-  }
-
-  /// Upload file
-  Future<bool> uploadFile({
-    required String localPath,
-    required String remotePath,
-    Function(int, int)? onProgress,
-  }) async {
-    if (!_isConnected || _sftpClient == null) {
-      throw Exception('Not connected to SFTP server');
     }
 
     try {
@@ -342,6 +375,9 @@ class SFTPService {
         // Use 256KB chunks — writeBytes internally pipelines 16 x 16KB writes
         const chunkSize = 256 * 1024;
         while (uploaded < fileSize) {
+          if (isCancelled != null && isCancelled()) {
+            throw Exception('Cancelled');
+          }
           final remaining = fileSize - uploaded;
           final toRead = remaining < chunkSize ? remaining : chunkSize;
           final chunk = await raf.read(toRead);
