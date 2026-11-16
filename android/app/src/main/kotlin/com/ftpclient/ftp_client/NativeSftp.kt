@@ -183,5 +183,12 @@ class NativeSftp(private val channel: MethodChannel) {
         private const val CIPHERS =
             "aes128-gcm@openssh.com,aes128-ctr,aes256-gcm@openssh.com,aes256-ctr," +
                 "aes192-ctr,chacha20-poly1305@openssh.com"
-    }
+
+        init {
+            // JSch defaults to the Java 15+ EdDSA classes, which Android lacks;
+            // CheckSignatures then silently drops ssh-ed25519 and key auth
+            // fails. Use the bundled BouncyCastle implementations instead.
+            JSch.setConfig("ssh-ed25519", "com.jcraft.jsch.bc.SignatureEd25519")
+            JSch.setConfig("ssh-ed448", "com.jcraft.jsch.bc.SignatureEd448")
+            JSch.setConfig("keypairgen.eddsa", "com.jcraft.jsch.bc.KeyPairGenEdDSA")        }    }
 }

@@ -41,6 +41,11 @@ class SFTPService {
     }
   }
 
+  /// JSch rejected the credentials that dartssh2 accepted
+  static bool _isNativeAuthFailure(Object e) =>
+      e.toString().contains('Auth fail') ||
+      e.toString().contains('invalid privatekey');
+
   /// Disconnect from SFTP server
   Future<void> disconnect() async {
     try {
@@ -199,16 +204,23 @@ class SFTPService {
     // On Android stream natively: dartssh2 buffers on the Dart heap and
     // runs out of memory on large files.
     if (NativeSftp.isSupported) {
-      final bytes = await NativeSftp.download(
-        connection: _connection!,
-        remotePath: remotePath,
-        localPath: localPath,
-        onProgress: onProgress,
-        isCancelled: isCancelled,
-        resume: resume,
-      );
-      debugPrint('[SFTP] Native download complete: $bytes bytes');
-      return true;
+      try {
+        final bytes = await NativeSftp.download(
+          connection: _connection!,
+          remotePath: remotePath,
+          localPath: localPath,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+          resume: resume,
+        );
+        debugPrint('[SFTP] Native download complete: $bytes bytes');
+        return true;
+      } catch (e) {
+        // This dartssh2 connection is already authenticated, so a native
+        // auth failure (e.g. an unsupported key type) shouldn't block us
+        if (!_isNativeAuthFailure(e)) rethrow;
+        debugPrint('[SFTP] Native auth failed, using dartssh2: $e');
+      }
     }
 
     final localFile = File(localPath);
@@ -339,15 +351,20 @@ class SFTPService {
 
     // On Android stream natively (see downloadFile)
     if (NativeSftp.isSupported) {
-      final bytes = await NativeSftp.upload(
-        connection: _connection!,
-        localPath: localPath,
-        remotePath: remotePath,
-        onProgress: onProgress,
-        isCancelled: isCancelled,
-      );
-      debugPrint('[SFTP] Native upload complete: $bytes bytes');
-      return true;
+      try {
+        final bytes = await NativeSftp.upload(
+          connection: _connection!,
+          localPath: localPath,
+          remotePath: remotePath,
+          onProgress: onProgress,
+          isCancelled: isCancelled,
+        );
+        debugPrint('[SFTP] Native upload complete: $bytes bytes');
+        return true;
+      } catch (e) {
+        if (!_isNativeAuthFailure(e)) rethrow;
+        debugPrint('[SFTP] Native auth failed, using dartssh2: $e');
+      }
     }
 
     try {

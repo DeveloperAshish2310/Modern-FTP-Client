@@ -26,6 +26,13 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    packaging {
+        resources {
+            // JSch and BouncyCastle both ship this OSGi manifest; unused on Android
+            excludes += "META-INF/versions/*/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
@@ -71,4 +78,6 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     // Native SFTP for large downloads (see NativeSftp.kt)
     implementation("com.github.mwiede:jsch:0.2.26")
+    // ed25519 keys: Android lacks Java 15+ EdDSA, so JSch needs BouncyCastle
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
 }
