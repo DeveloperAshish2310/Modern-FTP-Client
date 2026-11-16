@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.1] - 2026-11-16
+
+### Fixed
+- Viewing, downloading and uploading files failed with "Auth fail" on servers using an ed25519 SSH key
+- Opening a large text file (e.g. a SQL backup) froze the app
+
+### Added
+- Line wrap / unwrap toggle in the file viewer (remembered between sessions)
+- Large files (over 512 KB) open in a fast read-only viewer; files over 20 MB show a clear message instead of loading
+
+### Improved
+- Line numbers in the file viewer now stay aligned with the text while scrolling
+- Files with invalid UTF-8 characters open instead of showing an error
+
 ## [1.1.0] - 2026-11-10
 
 ### Server Management (SFTP/SSH servers)

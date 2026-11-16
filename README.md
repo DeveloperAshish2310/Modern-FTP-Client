@@ -167,7 +167,7 @@ lib/
 
 ## Version
 
-**1.1.0** — Server dashboard, SSH terminal, command triggers, server tools, and reliable transfers. See [CHANGELOG.md](CHANGELOG.md).
+**1.1.1** — SSH key fix for transfers, large-file viewer, line wrap toggle. See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
